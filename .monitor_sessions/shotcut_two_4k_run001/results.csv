@@ -1,0 +1,2 @@
+﻿software,mode,session_id,test_name,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
+shotcut,process,shotcut_two_4k_run001,two_4k,ok,2026-04-13T14:08:58.966+08:00,2026-04-13T14:27:01.688+08:00,1082.722,1082.722,0.000,shotcut.exe,37208,melt.exe,5472,,worker_process_runtime,Measure only melt.exe instances started by Shotcut to avoid unrelated MLT jobs.

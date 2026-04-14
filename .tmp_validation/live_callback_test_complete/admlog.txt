@@ -1,0 +1,4 @@
+[admSaver::save] 15:38:58-000 [A_Save] Saving..
+ 99% done	frames: 3500	elapsed: 00:03:29,800
+[x264Encoder::encode] 15:42:28-227 End of flush
+100% done	frames: 3539	elapsed: 00:03:30,227

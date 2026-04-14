@@ -1,0 +1,2 @@
+﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
+avidemux,log,avidemux_run003,no_capture,,,,,,,,,,C:\Users\zhuangjh3\AppData\Local\avidemux\admlog.txt,no_elapsed_marker,Prefer %LOCALAPPDATA% on Windows; %APPDATA%/Local is not a valid Local AppData path. No 'elapsed:' progress line was captured from Avidemux.

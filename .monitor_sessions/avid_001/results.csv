@@ -1,0 +1,2 @@
+﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
+avidemux,log,avid_001,no_capture,,,,,,,,C:\Users\zhuangjh3\Desktop\OneDrive_1_2026-4-2\code for autotest\$env:LOCALAPPDATA\avidemux\admlog.txt,no_log_activity,Prefer %LOCALAPPDATA% on Windows; %APPDATA%/Local is not a valid Local AppData path. Stop was requested before any new log content was captured.

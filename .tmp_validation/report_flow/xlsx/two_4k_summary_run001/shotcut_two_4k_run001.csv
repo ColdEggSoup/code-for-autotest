@@ -1,0 +1,2 @@
+﻿software,mode,session_id,test_name,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
+shotcut,process,shotcut_two_4k_run001,two_4k,ok,2026-04-13T10:00:00+08:00,2026-04-13T10:01:30+08:00,90.000,90.000,0.000,shotcut.exe,100,melt.exe,101,,worker_process_runtime,

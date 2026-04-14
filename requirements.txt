@@ -1,0 +1,2 @@
+psutil>=5.9,<7
+openpyxl>=3.1,<4

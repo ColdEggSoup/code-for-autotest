@@ -1,0 +1,2 @@
+﻿software,mode,session_id,test_name,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
+kdenlive,process,kdenlive_two_4k_run001,two_4k,ok,2026-04-13T14:29:11.210+08:00,2026-04-13T14:40:34.718+08:00,683.508,683.508,0.000,kdenlive.exe,30064,melt.exe,"6712, 1864",,worker_process_runtime_group,Measure only melt.exe instances started by Kdenlive to avoid unrelated MLT jobs. Aggregated 2 matching worker process runs into one session result.
