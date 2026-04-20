@@ -1,3 +1,0 @@
-﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-kdenlive,process,kdenlive_run001,ok,2026-04-10T13:45:04.054+08:00,2026-04-10T13:51:07.611+08:00,363.557,363.557,0.000,kdenlive.exe,17316,melt.exe,25476,,worker_process_runtime,Measure only melt.exe instances started by Kdenlive to avoid unrelated MLT jobs.
-kdenlive,process,kdenlive_run001,ok,2026-04-10T13:50:56.017+08:00,2026-04-10T13:51:07.611+08:00,11.595,11.595,0.000,kdenlive.exe,17316,melt.exe,6792,,worker_process_runtime,Measure only melt.exe instances started by Kdenlive to avoid unrelated MLT jobs.

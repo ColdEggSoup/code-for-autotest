@@ -11,6 +11,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, Optional
 
+from workspace_runtime import configure_workspace_runtime
+
+configure_workspace_runtime()
+
 import psutil
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -23,12 +27,25 @@ RESULT_HEADERS = [
     "end_time",
     "duration_seconds",
 ]
+COMPARISON_HEADERS = [
+    "test_software",
+    "comparison_group",
+    "baseline_test_case",
+    "turbo_test_case",
+    "baseline_duration_seconds",
+    "turbo_duration_seconds",
+    "improvement_percent",
+]
 PROGRESS_PATTERN = (
     r"^\s*(?P<percent>\d+)% done\s+frames:\s+(?P<frames>\d+)\s+elapsed:\s+"
     r"(?P<elapsed>\d{2}:\d{2}:\d{2},\d{3})\s*$"
 )
 TIMESTAMP_PATTERN = r"^\[[^\]]+\]\s(?P<clock>\d{2}:\d{2}:\d{2})-(?P<millis>\d{3})"
 COUNTED_OUTPUT_PATTERN = re.compile(r"^(?P<base>.+?)_run(?P<index>\d+)$", re.IGNORECASE)
+COMPARISON_CASE_PATTERN = re.compile(
+    r"^(?P<group>.+?)_(?P<variant>baseline|turbo)(?:_(?P<run>run\d+))?$",
+    re.IGNORECASE,
+)
 AVIDEMUX_SAVE_LOOP_MARKERS = ("[FF] Saving",)
 AVIDEMUX_END_MARKERS = ("End of flush",)
 GENERIC_DEVICE_VALUES = {
@@ -380,6 +397,56 @@ def build_result_row(
     }
 
 
+def parse_duration_value(raw_value: object) -> Optional[float]:
+    if raw_value in (None, ""):
+        return None
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def split_comparison_case(test_case: str) -> tuple[str, str] | None:
+    match = COMPARISON_CASE_PATTERN.fullmatch(test_case.strip())
+    if not match:
+        return None
+    group = match.group("group")
+    run_label = match.group("run")
+    if run_label:
+        group = f"{group}_{run_label}"
+    return group, match.group("variant").lower()
+
+
+def build_comparison_rows(result_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[tuple[str, str], dict[str, dict[str, object]]] = {}
+    for row in result_rows:
+        software = str(row.get("test_software", "")).strip()
+        test_case = str(row.get("test_case", "")).strip()
+        parsed = split_comparison_case(test_case)
+        if not software or parsed is None:
+            continue
+        group_key, variant = parsed
+        grouped.setdefault((software, group_key), {})[variant] = row
+
+    comparison_rows: list[dict[str, object]] = []
+    for (software, group_key), variants in sorted(grouped.items()):
+        baseline_row = variants.get("baseline")
+        turbo_row = variants.get("turbo")
+        if baseline_row is None or turbo_row is None:
+            continue
+        comparison_rows.append(
+            {
+                "test_software": software,
+                "comparison_group": group_key,
+                "baseline_test_case": baseline_row.get("test_case", ""),
+                "turbo_test_case": turbo_row.get("test_case", ""),
+                "baseline_duration_seconds": parse_duration_value(baseline_row.get("duration_seconds")),
+                "turbo_duration_seconds": parse_duration_value(turbo_row.get("duration_seconds")),
+            }
+        )
+    return comparison_rows
+
+
 def autosize_columns(worksheet) -> None:
     for column_cells in worksheet.columns:
         max_length = 0
@@ -390,11 +457,16 @@ def autosize_columns(worksheet) -> None:
         worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 14), 60)
 
 
-def build_workbook(device_info: list[tuple[str, str]], result_rows: list[dict[str, object]]) -> Workbook:
+def build_workbook(
+    device_info: list[tuple[str, str]],
+    result_rows: list[dict[str, object]],
+    comparison_rows: list[dict[str, object]],
+) -> Workbook:
     workbook = Workbook()
     device_sheet = workbook.active
     device_sheet.title = "DeviceInfo"
     result_sheet = workbook.create_sheet("TestResults")
+    comparison_sheet = workbook.create_sheet("Comparison")
 
     header_fill = PatternFill(fill_type="solid", fgColor="D9EAF7")
     header_font = Font(bold=True)
@@ -422,6 +494,30 @@ def build_workbook(device_info: list[tuple[str, str]], result_rows: list[dict[st
             cell.alignment = wrap_alignment
     result_sheet.freeze_panes = "A2"
     autosize_columns(result_sheet)
+
+    comparison_sheet.append(COMPARISON_HEADERS)
+    for cell in comparison_sheet[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+    for index, comparison_row in enumerate(comparison_rows, start=2):
+        comparison_sheet.append(
+            [
+                comparison_row["test_software"],
+                comparison_row["comparison_group"],
+                comparison_row["baseline_test_case"],
+                comparison_row["turbo_test_case"],
+                comparison_row["baseline_duration_seconds"],
+                comparison_row["turbo_duration_seconds"],
+                f'=IF(OR(E{index}="",F{index}="",E{index}<=0),"",(E{index}-F{index})/E{index})',
+            ]
+        )
+    for row in comparison_sheet.iter_rows():
+        for cell in row:
+            cell.alignment = wrap_alignment
+    comparison_sheet.freeze_panes = "A2"
+    for cell in comparison_sheet["G"][1:]:
+        cell.number_format = "0.00%"
+    autosize_columns(comparison_sheet)
     return workbook
 
 
@@ -458,10 +554,11 @@ def generate_xlsx_report(
         csv_paths,
         default_test_case=default_test_case,
     )
+    comparison_rows = build_comparison_rows(all_result_rows)
     output_path = resolve_output_path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    workbook = build_workbook(collect_device_info(), all_result_rows)
+    workbook = build_workbook(collect_device_info(), all_result_rows, comparison_rows)
     workbook.save(output_path)
     return len(csv_paths), len(all_result_rows), output_path
 

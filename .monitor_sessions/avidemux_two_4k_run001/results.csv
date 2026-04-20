@@ -1,2 +1,0 @@
-﻿software,mode,session_id,test_name,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-avidemux,log,avidemux_two_4k_run001,two_4k,ok,2026-04-13T07:06:49.386+08:00,2026-04-13T07:06:49.846+08:00,0.460,0.460,0.000,,,,,C:\Users\zhuangjh3\AppData\Local\avidemux\admlog.txt,avidemux_elapsed_100_percent_with_time_window,Prefer %LOCALAPPDATA% on Windows; %APPDATA%/Local is not a valid Local AppData path.

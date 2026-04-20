@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\zhuangjh3\Desktop\OneDrive_1_2026-4-2\code for autotest\main.py", line 11, in <module>
-    import psutil
-  File "C:\Users\zhuangjh3\AppData\Local\miniconda3\envs\autotest\lib\site-packages\psutil\__init__.py", line 110, in <module>
-    from . import _pswindows as _psplatform
-  File "C:\Users\zhuangjh3\AppData\Local\miniconda3\envs\autotest\lib\site-packages\psutil\_pswindows.py", line 35, in <module>
-    from ._psutil_windows import ABOVE_NORMAL_PRIORITY_CLASS
-ImportError: DLL load failed while importing _psutil_windows: 动态链接库(DLL)初始化例程失败。

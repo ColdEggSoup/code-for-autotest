@@ -1,6 +1,0 @@
-HandBrake
-
- # Starting Scan ...
-[10:12:48] hb_scan: path=demo.mp4
-
- # Scan Finished ...

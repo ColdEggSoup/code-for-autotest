@@ -1,3 +1,0 @@
-﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-oldsoft,log,s1,ok,2026-04-09T03:15:03.674+08:00,2026-04-09T03:16:59.000+08:00,115.119,,,,,,,,legacy,legacy row
-avidemux,log,s2,ok,2026-04-09T03:15:03.674+08:00,2026-04-09T03:16:59.000+08:00,115.119,115.326,0.207,,,,,admlog.txt,avidemux_elapsed_partial_with_time_window,test row

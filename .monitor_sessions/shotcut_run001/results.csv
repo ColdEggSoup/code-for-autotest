@@ -1,2 +1,0 @@
-﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-shotcut,process,shotcut_run001,no_capture,,,,,,,,,,,no_matching_worker,Measure only melt.exe instances started by Shotcut to avoid unrelated MLT jobs. No new matching worker process was captured.

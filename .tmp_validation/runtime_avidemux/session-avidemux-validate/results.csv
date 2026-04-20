@@ -1,2 +1,0 @@
-﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-avidemux,log,session-avidemux-validate,ok,,,563.676,,,,,C:\Users\zhuangjh3\Desktop\OneDrive_1_2026-4-2\code for autotest\.tmp_validation\logs_avidemux\admlog.txt,avidemux_elapsed_100_percent,Prefer %LOCALAPPDATA% on Windows; %APPDATA%/Local is not a valid Local AppData path.

@@ -12,6 +12,10 @@ from pathlib import Path
 
 import psutil
 
+from workspace_runtime import configure_workspace_runtime
+
+configure_workspace_runtime()
+
 from log_listener import LOG_PROFILES, run_log_listener
 from monitoring_common import (
     FINAL_SESSION_STATUSES,
@@ -26,6 +30,7 @@ from monitoring_common import (
     summarize_result_statuses,
 )
 from process_listener import PROCESS_PROFILES, run_process_listener
+from ui_automation import UiAutomationError, set_performance_boost_selection
 from xlsx_report_generator import generate_xlsx_report
 
 
@@ -750,6 +755,26 @@ def list_software(_: argparse.Namespace) -> int:
         print(f"  - {software} ({get_monitor_type(software)})")
     return 0
 
+def set_ui_boost(args: argparse.Namespace) -> int:
+    try:
+        results = set_performance_boost_selection(
+            window_title_re=args.window_title,
+            app_name=args.app_name,
+            timeout=args.timeout,
+        )
+    except UiAutomationError as exc:
+        print(f"ui_automation_error={exc}")
+        return 2
+    except Exception as exc:
+        print(f"ui_automation_error={type(exc).__name__}: {exc}")
+        return 2
+    for result in results:
+        print(f"target={result.target}")
+        print(f"state={result.state}")
+        print(f"changed={bool_text(result.changed)}")
+    return 0
+
+
 
 def run_worker(args: argparse.Namespace) -> int:
     runtime_root = get_runtime_root(args.runtime_root)
@@ -903,6 +928,11 @@ def build_parser() -> argparse.ArgumentParser:
     stop_parser.add_argument("--session-id", required=True, help="Session id.")
     stop_parser.add_argument("--wait-seconds", type=float, default=15.0, help="How long to wait for finalization.")
     stop_parser.set_defaults(handler=stop_session)
+    ui_boost_parser = subparsers.add_parser("ui-boost", help="Enable Performance Boost and check one app in the target Windows UI.")
+    ui_boost_parser.add_argument("--window-title", default="^AI Turbo Engine$", help="Regular expression used to connect to the target top-level window.")
+    ui_boost_parser.add_argument("--app-name", required=True, help="App label shown in the Performance Boost list, for example avidemux.")
+    ui_boost_parser.add_argument("--timeout", type=float, default=15.0, help="Seconds to wait for the target window.")
+    ui_boost_parser.set_defaults(handler=set_ui_boost)
     worker_parser = subparsers.add_parser("worker", parents=[shared_runtime], help=argparse.SUPPRESS)
     worker_parser.add_argument("--session-id", required=True, help="Session id.")
     worker_parser.set_defaults(handler=run_worker)
@@ -917,3 +947,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

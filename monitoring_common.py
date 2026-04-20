@@ -216,7 +216,8 @@ def load_json(path: Path) -> dict:
 
 
 def default_runtime_root(base_dir: Optional[Path] = None) -> Path:
-    root = (base_dir or Path.cwd()).resolve(strict=False) / ".monitor_sessions"
+    workspace_root = (base_dir or Path(__file__).resolve().parent).resolve(strict=False)
+    root = workspace_root / "trash" / ".monitor_sessions"
     return root
 
 

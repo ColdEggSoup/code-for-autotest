@@ -1,2 +1,0 @@
-﻿software,mode,session_id,test_name,status,started_at,ended_at,duration_seconds,computed_duration_seconds,duration_delta_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-handbrake,log,handbrake_two_4k_run001,two_4k,ok,2026-04-13T15:10:00.000+08:00,2026-04-13T15:15:12.000+08:00,312.000,312.000,0.000,,,,,C:\Users\zhuangjh3\AppData\Roaming\HandBrake\logs\澳大利亚维多利亚州 4K 3D1(3)_encode_04.13.2026 15-09-56.txt,work_markers,Prefer per-job log files under the logs directory and ignore generic activity logs by default.

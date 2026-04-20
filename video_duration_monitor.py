@@ -15,6 +15,10 @@ from typing import Iterable, Optional
 
 import psutil
 
+from workspace_runtime import configure_workspace_runtime
+
+configure_workspace_runtime()
+
 
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 TIME_ONLY_PATTERN = r"(?<!\d)(\d{2}:\d{2}:\d{2})(?:[-:.,](\d{1,3}))?(?!\d)"

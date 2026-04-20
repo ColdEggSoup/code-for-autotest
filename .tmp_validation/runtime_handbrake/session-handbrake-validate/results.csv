@@ -1,2 +1,0 @@
-﻿software,mode,session_id,status,started_at,ended_at,duration_seconds,main_process_name,main_process_pid,worker_process_name,worker_process_pid,source_path,evidence,notes
-handbrake,log,session-handbrake-validate,ok,2026-04-08T15:38:58.000+08:00,2026-04-08T15:43:53.000+08:00,295.000,,,,,C:\Users\zhuangjh3\Desktop\OneDrive_1_2026-4-2\code for autotest\.tmp_validation\logs_handbrake\job_001.txt,work_markers,Prefer per-job log files under the logs directory and ignore generic activity logs by default.

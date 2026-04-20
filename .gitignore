@@ -1,0 +1,18 @@
+.monitor_sessions/
+.tmp_partial_validation/
+.tmp_validation/
+__pycache__/
+*.pyc
+results/
+test_data/*
+!test_data/.gitkeep
+whitelist app/*
+!whitelist app/.gitkeep
+!whitelist app/app/
+!whitelist app/blender/
+whitelist app/app/*
+!whitelist app/app/.gitkeep
+whitelist app/blender/*
+!whitelist app/blender/.gitkeep
+admlog.txt
+202203142049(1)_encode_04.08.2026 15-38-53.txt
