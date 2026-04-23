@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import locale
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
+
+import psutil
 
 from monitoring_common import FINAL_SESSION_STATUSES
 from ui_automation import (
@@ -32,6 +36,8 @@ class SoftwareRuntimeSpec:
     ai_turbo_app_name: str
     export_suffix: str
     blend_file: Path | None = None
+    process_names: tuple[str, ...] = ()
+    startup_timeout_seconds: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -49,6 +55,8 @@ SOFTWARE_SPECS = {
         main_window_title_re=r".*Shotcut.*",
         ai_turbo_app_name="shotcut",
         export_suffix=".mp4",
+        process_names=("shotcut.exe",),
+        startup_timeout_seconds=90.0,
     ),
     "kdenlive": SoftwareRuntimeSpec(
         software="kdenlive",
@@ -56,6 +64,8 @@ SOFTWARE_SPECS = {
         main_window_title_re=r".*Kdenlive.*",
         ai_turbo_app_name="kdenlive",
         export_suffix=".mp4",
+        process_names=("kdenlive.exe",),
+        startup_timeout_seconds=90.0,
     ),
     "shutter_encoder": SoftwareRuntimeSpec(
         software="shutter_encoder",
@@ -63,6 +73,7 @@ SOFTWARE_SPECS = {
         main_window_title_re=r".*Shutter Encoder.*",
         ai_turbo_app_name="Shutter Encoder",
         export_suffix=".mp4",
+        process_names=("javaw.exe", "Shutter Encoder.exe"),
     ),
     "avidemux": SoftwareRuntimeSpec(
         software="avidemux",
@@ -70,6 +81,7 @@ SOFTWARE_SPECS = {
         main_window_title_re=r".*Avidemux.*",
         ai_turbo_app_name="avidemux",
         export_suffix=".mp4",
+        process_names=("avidemux.exe",),
     ),
     "handbrake": SoftwareRuntimeSpec(
         software="handbrake",
@@ -77,6 +89,7 @@ SOFTWARE_SPECS = {
         main_window_title_re=r".*HandBrake.*",
         ai_turbo_app_name="HandBrake",
         export_suffix=".mp4",
+        process_names=("HandBrake.exe",),
     ),
     "blender": SoftwareRuntimeSpec(
         software="blender",
@@ -85,8 +98,114 @@ SOFTWARE_SPECS = {
         ai_turbo_app_name="blender",
         export_suffix=".mp4",
         blend_file=WHITELIST_APP_DIR / "blender" / "13263.blend",
+        process_names=("blender.exe",),
     ),
 }
+
+
+def _import_pywinauto_desktop():
+    try:
+        from pywinauto import Desktop
+    except ImportError as exc:
+        raise UiAutomationError(
+            "pywinauto is not installed. Run: pip install -r requirements.txt"
+        ) from exc
+    return Desktop
+
+
+def _safe_window_text(window) -> str:
+    try:
+        return (window.window_text() or "").strip()
+    except Exception:
+        return ""
+
+
+def _safe_process_name(pid: int | None) -> str:
+    if not pid:
+        return ""
+    try:
+        return (psutil.Process(int(pid)).name() or "").strip()
+    except (psutil.Error, OSError, ValueError):
+        return ""
+
+
+def _list_matching_processes(process_names: tuple[str, ...]) -> list[tuple[str, int, str]]:
+    expected = {name.casefold() for name in process_names}
+    if not expected:
+        return []
+    matches: list[tuple[str, int, str]] = []
+    for process in psutil.process_iter(["pid", "name", "status"]):
+        try:
+            process_name = (process.info.get("name") or "").strip()
+        except (psutil.Error, OSError, ValueError):
+            continue
+        if not process_name or process_name.casefold() not in expected:
+            continue
+        pid = int(process.info.get("pid") or 0)
+        status = str(process.info.get("status") or "")
+        matches.append((process_name, pid, status))
+    matches.sort(key=lambda item: (item[0].casefold(), item[1]))
+    return matches
+
+
+def connect_software_window(
+    software: str,
+    timeout: float = 15.0,
+    *,
+    backends: tuple[str, ...] = ("uia",),
+):
+    spec = SOFTWARE_SPECS[software]
+    Desktop = _import_pywinauto_desktop()
+    title_pattern = re.compile(spec.main_window_title_re, re.IGNORECASE)
+    expected_process_names = {name.casefold() for name in spec.process_names}
+    deadline = time.monotonic() + timeout
+    last_seen_titles: list[str] = []
+    last_seen_processes: list[tuple[str, int, str]] = []
+
+    while time.monotonic() < deadline:
+        candidates = []
+        windows = []
+        seen_window_keys: set[tuple[int, int, str]] = set()
+        for backend in backends:
+            try:
+                backend_windows = list(Desktop(backend=backend).windows())
+            except Exception:
+                continue
+            for window in backend_windows:
+                title = _safe_window_text(window)
+                pid = int(getattr(getattr(window, "element_info", None), "process_id", 0) or 0)
+                handle = int(getattr(window, "handle", 0) or 0)
+                key = (handle, pid, title.casefold())
+                if key in seen_window_keys:
+                    continue
+                seen_window_keys.add(key)
+                windows.append(window)
+        last_seen_titles = [_safe_window_text(window) for window in windows if _safe_window_text(window)]
+        last_seen_processes = _list_matching_processes(spec.process_names)
+        for window in windows:
+            title = _safe_window_text(window)
+            if not title or not title_pattern.search(title):
+                continue
+            pid = getattr(window.element_info, "process_id", None)
+            process_name = _safe_process_name(pid)
+            if expected_process_names and process_name.casefold() not in expected_process_names:
+                continue
+            try:
+                rect = window.rectangle()
+                area = max(1, rect.width() * rect.height())
+            except Exception:
+                area = 1
+            candidates.append((-area, title.casefold(), int(pid or 0), window))
+        if candidates:
+            candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+            return candidates[0][3]
+        time.sleep(0.25)
+
+    raise UiAutomationError(
+        f"Could not connect to a visible {software} window matching '{spec.main_window_title_re}' "
+        f"and process names {spec.process_names}. Seen titles: {last_seen_titles[:10]}. "
+        f"Matching processes: {last_seen_processes[:10]}"
+    )
 
 
 def parse_key_value_output(raw_output: str) -> dict[str, str]:
@@ -97,6 +216,29 @@ def parse_key_value_output(raw_output: str) -> dict[str, str]:
         key, value = line.split("=", 1)
         result[key.strip()] = value.strip()
     return result
+
+
+def _decode_subprocess_stream(payload: bytes | str | None) -> str:
+    if payload is None:
+        return ""
+    if isinstance(payload, str):
+        return payload
+
+    encodings: list[str] = []
+    for candidate in ("utf-8-sig", "utf-8", locale.getpreferredencoding(False), "gb18030"):
+        if candidate and candidate not in encodings:
+            encodings.append(candidate)
+
+    for encoding_name in encodings:
+        try:
+            return payload.decode(encoding_name)
+        except UnicodeDecodeError:
+            continue
+    return payload.decode("utf-8", errors="replace")
+
+
+def _completed_output_text(completed: subprocess.CompletedProcess[str]) -> str:
+    return (completed.stdout or "") + (completed.stderr or "")
 
 
 def resolve_input_video(workload_name: str) -> Path:
@@ -139,8 +281,14 @@ class SoftwareLauncher:
 
     def wait_for_main_window(self, software: str, timeout: float = 30.0):
         spec = self.get_spec(software)
-        logger.info("Waiting for %s main window. timeout=%.1fs", software, timeout)
-        return connect_window(spec.main_window_title_re, timeout=timeout)
+        effective_timeout = max(timeout, spec.startup_timeout_seconds)
+        logger.info(
+            "Waiting for %s main window. requested_timeout=%.1fs effective_timeout=%.1fs",
+            software,
+            timeout,
+            effective_timeout,
+        )
+        return connect_software_window(software, timeout=effective_timeout, backends=("uia", "win32"))
 
 
 class MonitorBridge:
@@ -150,13 +298,19 @@ class MonitorBridge:
 
     def _run_main(self, args: list[str], *, timeout: float | None = None) -> subprocess.CompletedProcess[str]:
         command = [self.python_executable, "main.py", *args]
-        return subprocess.run(
+        completed = subprocess.run(
             command,
             cwd=str(self.repo_root),
             capture_output=True,
-            text=True,
+            text=False,
             check=False,
             timeout=timeout,
+        )
+        return subprocess.CompletedProcess(
+            completed.args,
+            completed.returncode,
+            _decode_subprocess_stream(completed.stdout),
+            _decode_subprocess_stream(completed.stderr),
         )
 
     def start_background_monitor(self, software: str, test_name: str, output_path: Path) -> MonitorLaunchResult:
@@ -172,7 +326,7 @@ class MonitorBridge:
                 str(output_path),
             ]
         )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert completed.returncode == 0, _completed_output_text(completed)
         payload = parse_key_value_output(completed.stdout)
         assert "session_id" in payload, completed.stdout
         resolved_output = payload.get("aggregate_output_path") or payload.get("output_path")
@@ -196,7 +350,7 @@ class MonitorBridge:
         last_payload: dict[str, str] = {}
         while time.monotonic() < deadline:
             completed = self._run_main(["status", "--session-id", session_id])
-            assert completed.returncode == 0, completed.stdout + completed.stderr
+            assert completed.returncode == 0, _completed_output_text(completed)
             last_payload = parse_key_value_output(completed.stdout)
             status = last_payload.get("status", "")
             if status in FINAL_SESSION_STATUSES:
@@ -216,7 +370,7 @@ class MonitorBridge:
             ],
             timeout=wait_seconds + 10.0,
         )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert completed.returncode == 0, _completed_output_text(completed)
         return parse_key_value_output(completed.stdout)
 
     def run_blender_monitor(
@@ -226,11 +380,13 @@ class MonitorBridge:
         output_path: Path,
         blend_file: Path,
         blender_executable: Path | None = None,
+        blender_ui_mode: str = "visible",
         render_mode: str = "frame",
         frame: int = 1,
     ) -> Path:
         assert blend_file.exists(), f"Blend file does not exist: {blend_file}"
         assert output_path.parent.exists(), f"Output directory does not exist: {output_path.parent}"
+        assert blender_ui_mode in {"visible", "headless"}, f"Unsupported Blender UI mode: {blender_ui_mode}"
         assert render_mode in {"frame", "animation"}, f"Unsupported Blender render mode: {render_mode}"
         assert frame >= 0, "frame must not be negative."
         args = [
@@ -243,6 +399,8 @@ class MonitorBridge:
             str(output_path),
             "--blend-file",
             str(blend_file),
+            "--blender-ui-mode",
+            blender_ui_mode,
             "--render-mode",
             render_mode,
             "--frame",
@@ -254,7 +412,7 @@ class MonitorBridge:
             args,
             timeout=7200.0,
         )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert completed.returncode == 0, _completed_output_text(completed)
         payload = parse_key_value_output(completed.stdout)
         resolved_output = payload.get("output_path") or str(output_path)
         return Path(resolved_output)

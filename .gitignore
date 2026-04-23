@@ -2,8 +2,10 @@
 .tmp_partial_validation/
 .tmp_validation/
 __pycache__/
+.pytest_cache/
 *.pyc
 results/
+software/
 test_data/*
 !test_data/.gitkeep
 whitelist app/*

@@ -26,6 +26,77 @@
 pip install -r requirements.txt
 ```
 
+执行初始化环境脚本时，现在也会生成清晰的结果文件：
+
+```powershell
+initialize_environment.cmd
+```
+
+产物位置：
+
+- `results/initialize_environment_runs/<时间戳>/initialize_summary.md`
+- `results/initialize_environment_runs/<时间戳>/initialize_progress.jsonl`
+- `results/initialize_environment_runs/<时间戳>/initialize_environment.log`
+
+其中：
+
+- `initialize_summary.md` 适合快速看当前初始化跑到哪一步、哪些软件已经安装成功
+- `initialize_progress.jsonl` 适合后续做自动分析
+- `initialize_environment.log` 保存完整详细日志
+
+## Pytest 测试流程
+
+仓库现在包含两层 `pytest` 流程：
+
+- `pytest`：只跑快速单元测试，不启动真实桌面软件
+- `pytest -m e2e ... --run-e2e`：执行流程一，按 `shotcut`、`kdenlive`、`shutter_encoder`、`avidemux`、`handbrake`、`blender` 顺序跑 baseline
+- `pytest -m "e2e and ai_turbo" ... --run-e2e --run-ai-turbo`：执行流程一 + 流程二；第二轮会启动 AI Turbo Engine、打开 `Performance Boost`、勾选对应 app，再生成带 `Comparison` sheet 的 xlsx
+
+`Comparison` sheet 会自动写入提升公式：
+
+- `improvement_percent = (baseline_duration_seconds - turbo_duration_seconds) / baseline_duration_seconds`
+
+常用命令：
+
+```powershell
+python -m pytest
+python -m pytest -m e2e tests/e2e/test_full_pipeline_workflow.py --run-e2e --pipeline-results-root results/pytest_runs
+python -m pytest -m "e2e and ai_turbo" tests/e2e/test_full_pipeline_workflow.py --run-e2e --run-ai-turbo --pipeline-results-root results/pytest_runs
+```
+
+常用可选参数：
+
+- `--pipeline-workload-name`
+- `--pipeline-input-video`
+- `--pipeline-blend-file`
+- `--pipeline-blender-exe`
+- `--pipeline-software`
+- `--pytest-artifacts-root`
+
+`pytest` 现在会额外生成两层更清晰的结果文件：
+
+- 会话级汇总：`results/pytest_reports/<时间戳>/session_summary.md`
+- 会话级完整日志：`results/pytest_reports/<时间戳>/pytest_session.log`
+- 单次 pipeline 进度：`results/pytest_runs/<本次目录>/pipeline_summary.md`
+- 单次 pipeline 结构化事件流：`results/pytest_runs/<本次目录>/pipeline_progress.jsonl`
+
+其中：
+
+- `session_summary.md` 适合快速看每个测试是否通过、耗时多少、产物路径在哪
+- `pipeline_summary.md` 适合看流程当前跑到哪一步、哪个软件成功、哪个软件失败
+- `pipeline_progress.jsonl` 适合后续做自动分析或导入别的工具
+
+终端里也会实时打印简洁步骤，例如：
+
+```text
+[pipeline][started] case variant=baseline software=shotcut
+[pipeline][completed] case variant=baseline software=shotcut csv=...
+[pipeline][started] report report=...
+[pipeline][completed] pipeline report=...
+```
+
+当前这台机器如果还没有安装 AI Turbo Engine，先跑 baseline 命令即可；等软件安装好后，再执行 `ai_turbo` 那条命令。
+
 ## 主要命令
 
 查看支持的软件：

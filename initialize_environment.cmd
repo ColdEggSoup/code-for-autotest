@@ -30,7 +30,9 @@ if not defined PYTHON_LAUNCHER (
     exit /b 1
 )
 
-call %PYTHON_LAUNCHER% "%REPO_ROOT%initialize_environment.py" %*
+set "INIT_ARTIFACTS_ROOT=%REPO_ROOT%results\initialize_environment_runs"
+echo Initialization artifacts will be written under "%INIT_ARTIFACTS_ROOT%".
+call %PYTHON_LAUNCHER% "%REPO_ROOT%initialize_environment.py" --artifacts-root "%INIT_ARTIFACTS_ROOT%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 exit /b %EXIT_CODE%

@@ -8,6 +8,7 @@ Extra args after `--`:
     1. csv output path
     2. session id
     3. optional json status path
+    4. optional ui mode: visible or headless
 """
 
 from __future__ import annotations
@@ -51,8 +52,10 @@ STATE = {
     "session_id": None,
     "started_at": None,
     "status_path": None,
+    "ui_mode": None,
     "row_count": 0,
     "last_row_status": "",
+    "quit_requested": False,
 }
 
 
@@ -305,6 +308,23 @@ def get_status_path() -> Path:
     return status_path
 
 
+def get_ui_mode() -> str:
+    if STATE["ui_mode"] is not None:
+        return str(STATE["ui_mode"])
+
+    extra_args = parse_extra_args()
+    if len(extra_args) >= 4 and extra_args[3] in {"visible", "headless"}:
+        ui_mode = extra_args[3]
+    else:
+        ui_mode = "headless" if bpy.app.background else "visible"
+    STATE["ui_mode"] = ui_mode
+    return ui_mode
+
+
+def should_auto_quit_after_capture() -> bool:
+    return get_ui_mode() == "visible"
+
+
 def blend_source_path() -> str:
     return bpy.data.filepath or "<unsaved>"
 
@@ -317,6 +337,32 @@ def append_row(row: dict[str, str]) -> None:
 
 def reset_started_at() -> None:
     STATE["started_at"] = None
+
+
+def _quit_blender_after_capture():
+    try:
+        print("Requesting Blender to quit after render capture.", flush=True)
+        bpy.ops.wm.quit_blender()
+    except Exception as exc:
+        print(f"Could not quit Blender automatically after render capture: {exc}", flush=True)
+    return None
+
+
+def request_quit_after_capture() -> None:
+    if not should_auto_quit_after_capture():
+        return
+    if bool(STATE["quit_requested"]):
+        return
+    STATE["quit_requested"] = True
+    emit_progress(
+        progress_state="render_capture_completed_waiting_for_exit",
+        progress_message="Blender render capture is complete. Requesting the visible Blender window to close.",
+        status="running",
+        capture_detected=bool(STATE["row_count"]),
+        capture_complete=bool(STATE["row_count"]),
+        preview_status="complete" if STATE["row_count"] else "none",
+    )
+    bpy.app.timers.register(_quit_blender_after_capture, first_interval=0.2)
 
 
 def process_pid() -> str:
@@ -431,6 +477,7 @@ def on_render_complete(scene):
         preview_evidence=row["evidence"],
     )
     reset_started_at()
+    request_quit_after_capture()
 
 
 @persistent
@@ -458,6 +505,7 @@ def on_render_cancel(scene):
         preview_evidence=row["evidence"],
     )
     reset_started_at()
+    request_quit_after_capture()
 
 
 def remove_handler(handler_list, handler) -> None:
@@ -486,6 +534,7 @@ def register() -> None:
     print(f"runtime_base={base_runtime_dir()}", flush=True)
     print(f"csv_output={get_output_path()}", flush=True)
     print(f"status_output={get_status_path()}", flush=True)
+    print(f"ui_mode={get_ui_mode()}", flush=True)
 
 
 def unregister() -> None:

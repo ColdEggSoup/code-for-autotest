@@ -32,6 +32,7 @@ SWP_NOSIZE = 0x0001
 SWP_SHOWWINDOW = 0x0040
 SW_RESTORE = 9
 SW_MINIMIZE = 6
+WM_CLOSE = 0x0010
 DEFAULT_DIALOG_PATTERNS = (
     r"^Open$",
     r"^Save$",
@@ -80,8 +81,24 @@ FILE_NAME_LABEL_PATTERNS = (
     r"^\u540d\u79f0(?:\uff1a|:)?$",
 )
 FILE_LIST_CONTROL_TYPES = ("DataItem", "ListItem", "TreeItem", "Text")
-COMMON_CLOSE_DIALOG_PATTERNS = (r"save", r"confirm", r"warning", r"question")
-COMMON_DISCARD_PATTERNS = (r"don't save", r"discard", r"no", r"close without saving")
+COMMON_CLOSE_DIALOG_PATTERNS = (
+    r"save",
+    r"confirm",
+    r"warning",
+    r"question",
+    "\u4fdd\u5b58",
+    "\u786e\u8ba4",
+    "\u8b66\u544a",
+    "\u95ee\u9898",
+)
+COMMON_DISCARD_PATTERNS = (
+    r"^don't save(?:\b|[(])",
+    r"^discard(?:\b|[(])",
+    r"^no(?:\b|[(])",
+    r"^close without saving(?:\b|[(])",
+    "^\u4e0d\u4fdd\u5b58(?:$|[(])",
+    "^\u5426(?:$|[(])",
+)
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 
@@ -332,6 +349,56 @@ def send_hotkey(keys: str) -> None:
     _, _, keyboard = _import_pywinauto()
     keyboard.send_keys(keys, pause=0.05, with_spaces=True)
     time.sleep(0.25)
+
+
+def _is_process_running(process_id: int | None) -> bool:
+    if not process_id:
+        return False
+    try:
+        _, Desktop, _ = _import_pywinauto()
+        for window in Desktop(backend="uia").windows():
+            if _get_process_id(window) == process_id:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def request_window_close(window) -> bool:
+    handle = _get_window_handle(window)
+    title = _safe_window_text(window) or "<untitled>"
+    process_id = _get_process_id(window)
+    if handle is None:
+        if not _is_process_running(process_id):
+            logger.info(
+                "Skipping WM_CLOSE because window '%s' no longer exposes a handle and process=%s is not running.",
+                title,
+                process_id or "<unknown>",
+            )
+            return False
+        raise UiAutomationError(f"Could not resolve a native window handle for '{_safe_window_text(window)}'.")
+    if not _is_window_handle_visible(handle):
+        logger.info(
+            "Skipping WM_CLOSE because window '%s' handle=%s is no longer visible.",
+            title,
+            handle,
+        )
+        return False
+    result = ctypes.windll.user32.PostMessageW(handle, WM_CLOSE, 0, 0)
+    if not result:
+        if not _is_window_handle_visible(handle) or not _is_process_running(process_id):
+            logger.info(
+                "WM_CLOSE target '%s' disappeared while closing. handle=%s process=%s",
+                title,
+                handle,
+                process_id or "<unknown>",
+            )
+            return False
+        raise UiAutomationError(
+            f"Windows rejected the close request for '{title}' (handle={handle})."
+        )
+    logger.info("Posted WM_CLOSE to window '%s' handle=%s.", title, handle)
+    return True
 
 
 def _find_first_control(root, control_types: Sequence[str]):
@@ -752,11 +819,29 @@ def _is_window_handle_visible(handle: int) -> bool:
     _, Desktop, _ = _import_pywinauto()
     try:
         for window in Desktop(backend="uia").windows():
-            if getattr(window, "handle", None) == handle:
+            if _get_window_handle(window) == handle:
                 return True
     except Exception:
         return False
     return False
+
+
+def _read_int_like(value) -> int | None:
+    current = value
+    for _ in range(2):
+        if callable(current):
+            try:
+                current = current()
+            except Exception:
+                return None
+            continue
+        break
+    if current in (None, ""):
+        return None
+    try:
+        return int(current)
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_window_handle(window) -> int | None:
@@ -766,11 +851,26 @@ def _get_window_handle(window) -> int | None:
     )
     for reader in readers:
         try:
-            handle = reader()
+            handle = _read_int_like(reader())
         except Exception:
             continue
         if handle:
-            return int(handle)
+            return handle
+    return None
+
+
+def _get_process_id(window) -> int | None:
+    readers = (
+        lambda: getattr(getattr(window, "element_info", None), "process_id", None),
+        lambda: getattr(window, "process_id", None),
+    )
+    for reader in readers:
+        try:
+            process_id = _read_int_like(reader())
+        except Exception:
+            continue
+        if process_id:
+            return process_id
     return None
 
 
@@ -1016,17 +1116,46 @@ def fill_file_dialog(
         accept_overwrite_confirmation(timeout=2.0, owner_window=dialog, poll_interval=0.05)
 
 
-def dismiss_close_prompts(timeout: float = 2.0) -> None:
+def dismiss_close_prompts(timeout: float = 2.0, owner_window=None) -> None:
     deadline = time.monotonic() + timeout
+    owner_process_id = _get_process_id(owner_window) if owner_window is not None else None
+    _, Desktop, _ = _import_pywinauto()
+    compiled_titles = _compiled_patterns(COMMON_CLOSE_DIALOG_PATTERNS)
     while time.monotonic() < deadline:
-        try:
-            dialog = wait_for_window(COMMON_CLOSE_DIALOG_PATTERNS, timeout=0.5)
-        except UiAutomationError:
+        candidates = []
+        for window in Desktop(backend="uia").windows():
+            title = _safe_window_text(window)
+            if not title or not _matches_text(title, compiled_titles):
+                continue
+            if owner_process_id is not None and _get_process_id(window) != owner_process_id:
+                continue
+            try:
+                rect = _wrapper_rect(window)
+            except UiAutomationError:
+                continue
+            candidates.append((rect.top, rect.left, window))
+        if not candidates:
             return
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        dialog = candidates[0][2]
+        dialog_handle = _get_window_handle(dialog)
         try:
             click_text_control(dialog, COMMON_DISCARD_PATTERNS, control_types=("Button",))
+            if _wait_for_window_to_close(dialog_handle, timeout=0.8):
+                continue
         except UiAutomationError:
+            pass
+        try:
+            bring_window_to_front(dialog, keep_topmost=False)
+            send_hotkey("%d")
+            if _wait_for_window_to_close(dialog_handle, timeout=0.6):
+                continue
+            send_hotkey("%n")
+            if _wait_for_window_to_close(dialog_handle, timeout=0.6):
+                continue
+        except Exception:
             return
+        time.sleep(0.1)
 
 
 def _vertical_overlap(a, b) -> int:

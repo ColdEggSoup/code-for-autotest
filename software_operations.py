@@ -7,9 +7,10 @@ import os
 import shutil
 from pathlib import Path
 import re
+import subprocess
 import time
 
-from automation_components import SOFTWARE_SPECS
+from automation_components import SOFTWARE_SPECS, connect_software_window
 from ui_automation import (
     UiAutomationError,
     accept_overwrite_confirmation,
@@ -25,8 +26,8 @@ from ui_automation import (
     get_foreground_window,
     minimize_window,
     paste_text_via_clipboard,
+    request_window_close,
     send_hotkey,
-    set_edit_text_value,
     wait_for_desktop_text_control,
     wait_for_text_control,
     wait_for_file_dialog,
@@ -75,6 +76,26 @@ SHOTCUT_JOBS_TIMEOUT_SECONDS = 6.0
 SHOTCUT_EXPORT_POLL_SECONDS = 1.0
 
 AVIDEMUX_MAIN_WINDOW_CLASS = "MainWindow"
+AVIDEMUX_OPEN_DIALOG_PATTERNS = (
+    r"^Select Video File.*$",
+    r"^Open(?: File)?$",
+    r"^\u6253\u5f00(?:\u6587\u4ef6)?$",
+)
+AVIDEMUX_INFO_DIALOG_PATTERNS = (r"^Info$", r"^\u4fe1\u606f$")
+AVIDEMUX_THANKS_DIALOG_PATTERNS = (r"^Thanks!?$",)
+AVIDEMUX_DIALOG_OK_PATTERNS = (r"^OK$", r"^\u786e\u5b9a$")
+AVIDEMUX_OPEN_FAILURE_PATTERNS = (
+    r"^Could not open the file$",
+    r"^Cannot find a demuxer for .*$",
+    r"^\u65e0\u6cd5\u6253\u5f00\u8be5\u6587\u4ef6$",
+)
+AVIDEMUX_DEMUXER_FAILURE_PATTERNS = (r"^Cannot find a demuxer for .*$",)
+AVIDEMUX_EXPORT_SUCCESS_PATTERNS = (
+    r"^Done$",
+    r"^File .+ has been successfully saved\.$",
+    r"^\u5df2\u5b8c\u6210$",
+    r"^.+\u5df2\u6210\u529f\u4fdd\u5b58.*$",
+)
 AVIDEMUX_CODEC_SELECTION_TIMEOUT_SECONDS = 8.0
 AVIDEMUX_DIALOG_TIMEOUT_SECONDS = 8.0
 AVIDEMUX_DIALOG_SETTLE_SECONDS = 0.6
@@ -83,6 +104,9 @@ AVIDEMUX_EXPORT_POLL_SECONDS = 2.0
 AVIDEMUX_EXPORT_STABLE_ROUNDS = 5
 AVIDEMUX_EXPORT_TIMEOUT_SECONDS = 7200.0
 AVIDEMUX_SAVE_START_TIMEOUT_SECONDS = 20.0
+AVIDEMUX_CLOSE_RETRY_COUNT = 3
+AVIDEMUX_CLOSE_SETTLE_SECONDS = 0.6
+AVIDEMUX_CLOSE_TIMEOUT_SECONDS = 2.5
 AVIDEMUX_FILE_ENTRY_MIN_WIDTH = 300
 AVIDEMUX_FILE_ENTRY_MIN_LEFT = 150
 AVIDEMUX_FILE_ENTRY_TOP_MIN = 520
@@ -137,10 +161,6 @@ HAND_BRAKE_START_TIMEOUT_SECONDS = 20.0
 HAND_BRAKE_EXPORT_TIMEOUT_SECONDS = 7200.0
 HAND_BRAKE_EXPORT_POLL_SECONDS = 2.0
 HAND_BRAKE_EXPORT_STABLE_ROUNDS = 4
-HAND_BRAKE_FILE_DIALOG_EDIT_TOP_MIN = 760
-HAND_BRAKE_FILE_DIALOG_EDIT_TOP_MAX = 850
-HAND_BRAKE_FILE_DIALOG_BUTTON_TOP_MIN = 820
-HAND_BRAKE_FILE_DIALOG_BUTTON_TOP_MAX = 900
 HAND_BRAKE_SAVE_PATH_EDIT_TOP_MIN = 1020
 HAND_BRAKE_SAVE_PATH_EDIT_TOP_MAX = 1120
 HAND_BRAKE_VIDEO_ENCODER_TOP_MIN = 520
@@ -185,10 +205,29 @@ KDENLIVE_ACTIVE_RENDER_PATTERNS = (
     r".*\(frame \d+ @ \d+(?:\.\d+)? fps\).*$",
     r"^\u5269\u4f59\u65f6\u95f4.*$",
 )
+KDENLIVE_FINISHED_RENDER_PATTERNS = (
+    r"^Rendering finished\b.*$",
+    r"^\u6e32\u67d3.*\u5b8c\u6210.*$",
+)
 KDENLIVE_ABORT_JOB_PATTERNS = (r"^Abort Job$", r"^\u4e2d\u6b62\u4efb\u52a1$")
 KDENLIVE_START_JOB_PATTERNS = (r"^Start Job$", r"^\u542f\u52a8\u4efb\u52a1$")
 KDENLIVE_CLEAN_UP_PATTERNS = (r"^Clean Up$", r"^\u6e05\u7406$")
 KDENLIVE_CLOSE_BUTTON_PATTERNS = (r"^Close$", r"^\u5173\u95ed$")
+KDENLIVE_WARNING_DIALOG_PATTERNS = (r"^Warning(?: - Kdenlive)?$", r"^\u8b66\u544a(?: - Kdenlive)?$")
+KDENLIVE_SAVE_CHANGES_TEXT_PATTERNS = (
+    r"^Save changes to document\?$",
+    r"^\u4fdd\u5b58.*\u6587\u6863.*\?$",
+)
+KDENLIVE_DONT_SAVE_PATTERNS = (
+    r"^Don't Save(?:\([A-Z]\))?$",
+    r"^Do Not Save(?:\([A-Z]\))?$",
+    r"^\u4e0d\u4fdd\u5b58(?:\([A-Z]\))?$",
+)
+KDENLIVE_DIALOG_CANCEL_PATTERNS = (r"^Cancel(?:\([A-Z]\))?$", r"^\u53d6\u6d88(?:\([A-Z]\))?$")
+KDENLIVE_PROFILE_SWITCH_TEXT_PATTERNS = (
+    r"^Switch to clip .*\bprofile\b.*\?$",
+    r"^\u5207\u6362.*\u914d\u7f6e.*\?$",
+)
 KDENLIVE_OUTPUT_FILE_LABEL_PATTERNS = (r"^Output file$", r"^\u8f93\u51fa\u6587\u4ef6$")
 KDENLIVE_RENDER_LENGTH_PATTERNS = (r"^Rendered File Length:.*$", r"^\u6e32\u67d3\u6587\u4ef6\u65f6\u957f:.*$")
 KDENLIVE_CLIP_CONTROL_TYPES = ("TreeItem", "ListItem", "DataItem", "Text")
@@ -200,6 +239,8 @@ KDENLIVE_IMPORT_SETTLE_SECONDS = 1.0
 KDENLIVE_RENDER_POLL_SECONDS = 1.0
 KDENLIVE_RENDER_STABLE_ROUNDS = 3
 KDENLIVE_UI_IDLE_ROUNDS = 2
+KDENLIVE_FALLBACK_COMPLETION_STABLE_ROUNDS = 12
+KDENLIVE_FALLBACK_COMPLETION_IDLE_ROUNDS = 12
 KDENLIVE_MIN_OUTPUT_BYTES = 1024
 
 SHUTTER_ENCODER_UPDATE_DIALOG_PATTERNS = (
@@ -340,6 +381,9 @@ class SoftwareOperator:
     def __init__(self, profile: OperationProfile) -> None:
         self.profile = profile
 
+    def _connect_main_window(self, timeout: float = 30.0):
+        return connect_software_window(self.profile.software, timeout=timeout)
+
     def perform(self, input_video_path: Path, output_video_path: Path) -> None:
         logger.info("Starting %s operation. input=%s output=%s", self.profile.software, input_video_path, output_video_path)
         logger.info("Validating %s input and output paths.", self.profile.software)
@@ -350,7 +394,7 @@ class SoftwareOperator:
         )
 
         logger.info("Connecting to %s main window.", self.profile.software)
-        window = connect_window(self.profile.main_window_title_re, timeout=30.0)
+        window = self._connect_main_window(timeout=30.0)
         bring_window_to_front(window, keep_topmost=False)
         self._import_input(window, input_video_path)
         self._start_export(window, output_video_path)
@@ -358,17 +402,18 @@ class SoftwareOperator:
     def close(self) -> None:
         logger.info("Closing %s.", self.profile.software)
         try:
-            window = connect_window(self.profile.main_window_title_re, timeout=2.0)
+            window = self._connect_main_window(timeout=2.0)
         except UiAutomationError:
             logger.info("%s window is already closed.", self.profile.software)
             return
         bring_window_to_front(window, keep_topmost=False)
         try:
             window.close()
-        except Exception:
-            send_hotkey("%{F4}")
+        except Exception as exc:
+            logger.info("%s window.close() raised %s. Falling back to WM_CLOSE.", self.profile.software, exc)
+            request_window_close(window)
         time.sleep(1.0)
-        dismiss_close_prompts()
+        dismiss_close_prompts(owner_window=window)
 
     def _minimize_window_during_wait(self, window, *, phase: str) -> None:
         try:
@@ -420,7 +465,7 @@ class ShotcutOperator(SoftwareOperator):
         assert output_video_path.suffix.lower() == ".mp4", f"Shotcut export target must be an mp4 file: {output_video_path}"
 
         logger.info("Connecting to Shotcut main window.")
-        window = connect_window(self.profile.main_window_title_re, timeout=30.0)
+        window = self._connect_main_window(timeout=max(30.0, SOFTWARE_SPECS["shotcut"].startup_timeout_seconds))
         bring_window_to_front(window, keep_topmost=False)
 
         logger.info("Locating Shotcut toolbar.")
@@ -431,7 +476,7 @@ class ShotcutOperator(SoftwareOperator):
         fill_file_dialog(input_video_path, dialog_patterns=OPEN_DIALOG_PATTERNS, must_exist=True)
 
         logger.info("Reconnecting to Shotcut after input selection.")
-        window = connect_window(self.profile.main_window_title_re, timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+        window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
         bring_window_to_front(window, keep_topmost=False)
         toolbar = self._find_child_by_class_name(window, "QToolBar")
         encode_dock = self._find_child_by_class_name(window, "EncodeDock")
@@ -445,7 +490,7 @@ class ShotcutOperator(SoftwareOperator):
         self._export_clip(encode_dock, output_video_path)
 
         logger.info("Reconnecting to Shotcut to inspect Jobs pane.")
-        window = connect_window(self.profile.main_window_title_re, timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+        window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
         bring_window_to_front(window, keep_topmost=False)
         toolbar = self._find_child_by_class_name(window, "QToolBar")
         jobs_dock = self._find_child_by_class_name(window, "JobsDock")
@@ -712,6 +757,218 @@ class AvidemuxOperator(SoftwareOperator):
             time.sleep(0.25)
         raise UiAutomationError("Could not connect to the Avidemux main window.") from last_error
 
+    def _process_id(self, window) -> int | None:
+        try:
+            process_id = getattr(getattr(window, "element_info", None), "process_id", None)
+        except Exception:
+            return None
+        return int(process_id) if process_id else None
+
+    def _is_visible(self, window) -> bool:
+        try:
+            return bool(window.is_visible())
+        except Exception:
+            return True
+
+    def _iter_process_top_level_windows(self, process_id: int | None):
+        if process_id is None:
+            return []
+        from pywinauto import Desktop
+
+        matches = []
+        for window in Desktop(backend="uia").windows():
+            if self._process_id(window) != process_id:
+                continue
+            if not self._is_visible(window):
+                continue
+            try:
+                rect = self._wrapper_rect(window)
+            except Exception:
+                continue
+            area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+            matches.append((rect.top, rect.left, -area, window))
+        matches.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [item[-1] for item in matches]
+
+    def _first_matching_text(self, root, patterns: tuple[str, ...]) -> str:
+        for wrapper in self._iter_wrapper_tree(root):
+            text = self._wrapper_text(wrapper)
+            if text and self._matches_patterns(text, patterns):
+                return text
+        return ""
+
+    def _find_process_top_level_window(self, process_id: int | None, patterns: tuple[str, ...], *, timeout: float = 0.5):
+        if process_id is None:
+            return None
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            matches = []
+            for window in self._iter_process_top_level_windows(process_id):
+                title = self._wrapper_text(window)
+                if not title or not self._matches_patterns(title, patterns):
+                    continue
+                try:
+                    rect = self._wrapper_rect(window)
+                except Exception:
+                    continue
+                matches.append(((rect.top, rect.left), window))
+            if matches:
+                matches.sort(key=lambda item: item[0])
+                return matches[0][1]
+            time.sleep(0.1)
+        return None
+
+    def _find_process_top_level_window_by_content(
+        self,
+        process_id: int | None,
+        patterns: tuple[str, ...],
+        *,
+        timeout: float = 0.5,
+    ):
+        if process_id is None:
+            return None
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            matches = []
+            for window in self._iter_process_top_level_windows(process_id):
+                matched_text = self._first_matching_text(window, patterns)
+                if not matched_text:
+                    continue
+                try:
+                    rect = self._wrapper_rect(window)
+                except Exception:
+                    continue
+                matches.append(((rect.top, rect.left), window))
+            if matches:
+                matches.sort(key=lambda item: item[0])
+                return matches[0][1]
+            time.sleep(0.1)
+        return None
+
+    def _dismiss_thanks_popup_if_present(self, window, *, timeout: float = 0.5) -> bool:
+        dialog = self._find_process_top_level_window(self._process_id(window), AVIDEMUX_THANKS_DIALOG_PATTERNS, timeout=timeout)
+        if dialog is None:
+            return False
+        logger.info("Dismissing the Avidemux 'Thanks!' popup.")
+        try:
+            bring_window_to_front(dialog, keep_topmost=False)
+            dialog.close()
+        except Exception:
+            request_window_close(dialog)
+        time.sleep(0.5)
+        return True
+
+    def _dismiss_open_failure_dialog_if_present(self, window, *, timeout: float = 0.8) -> str:
+        dialog = self._find_process_top_level_window(self._process_id(window), AVIDEMUX_INFO_DIALOG_PATTERNS, timeout=timeout)
+        if dialog is None:
+            return ""
+
+        message = ""
+        for wrapper in self._iter_wrapper_tree(dialog):
+            text = self._wrapper_text(wrapper)
+            if text and self._matches_patterns(text, AVIDEMUX_OPEN_FAILURE_PATTERNS):
+                message = text
+                break
+        if not message:
+            return ""
+
+        logger.info("Dismissing the Avidemux open-file failure dialog: %s", message)
+        try:
+            ok_button = find_text_control(dialog, AVIDEMUX_DIALOG_OK_PATTERNS, control_types=("Button",))
+            ok_button.click_input()
+        except Exception:
+            try:
+                dialog.close()
+            except Exception:
+                request_window_close(dialog)
+        time.sleep(0.5)
+        return message
+
+    def _dismiss_export_success_dialog_if_present(
+        self,
+        window,
+        output_video_path: Path | None = None,
+        *,
+        timeout: float = 0.8,
+    ) -> bool:
+        process_id = self._process_id(window)
+        dialog = self._find_process_top_level_window_by_content(
+            process_id,
+            AVIDEMUX_EXPORT_SUCCESS_PATTERNS,
+            timeout=timeout,
+        )
+        if dialog is None:
+            return False
+
+        observed_texts: list[str] = []
+        matched_text = ""
+        output_name = output_video_path.name.casefold() if output_video_path is not None else ""
+        for wrapper in self._iter_wrapper_tree(dialog):
+            text = self._wrapper_text(wrapper)
+            if not text:
+                continue
+            observed_texts.append(text)
+            if self._matches_patterns(text, AVIDEMUX_EXPORT_SUCCESS_PATTERNS):
+                matched_text = text
+        if not matched_text:
+            return False
+
+        observed_blob = " | ".join(observed_texts).casefold()
+        if output_name and output_name not in observed_blob and "successfully saved" not in observed_blob:
+            return False
+
+        logger.info(
+            "Dismissing the Avidemux export completion dialog for '%s': %s",
+            output_video_path.name if output_video_path is not None else "<unknown>",
+            matched_text,
+        )
+        try:
+            bring_window_to_front(dialog, keep_topmost=False)
+            try:
+                ok_button = find_text_control(dialog, AVIDEMUX_DIALOG_OK_PATTERNS, control_types=("Button", "Custom", "Pane"))
+                ok_button.click_input()
+            except Exception:
+                send_hotkey("{ENTER}")
+        except Exception:
+            try:
+                dialog.close()
+            except Exception:
+                request_window_close(dialog)
+        time.sleep(0.5)
+        return True
+
+    def _wait_for_loaded_content(self, timeout: float = 15.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                window = self._connect_main_window(timeout=1.0)
+            except UiAutomationError:
+                time.sleep(0.2)
+                continue
+            zero_duration_visible = control_exists(
+                window,
+                re.escape("/ 00:00:00.000"),
+                control_types=("Text",),
+            )
+            placeholder_visible = control_exists(
+                window,
+                r"^XXXX$",
+                control_types=("Text",),
+            )
+            zero_tracks_visible = control_exists(
+                window,
+                r"^\(0 tracks\)$",
+                control_types=("Text",),
+            )
+            if not zero_duration_visible and not placeholder_visible:
+                return True
+            if not zero_duration_visible and not zero_tracks_visible:
+                return True
+            time.sleep(0.2)
+        return False
+
     def perform(self, input_video_path: Path, output_video_path: Path) -> None:
         logger.info("Avidemux flow started. input=%s output=%s", input_video_path, output_video_path)
         logger.info("Validating Avidemux input and output paths.")
@@ -721,6 +978,7 @@ class AvidemuxOperator(SoftwareOperator):
 
         window = self._connect_main_window(timeout=30.0)
         bring_window_to_front(window, keep_topmost=False)
+        self._dismiss_thanks_popup_if_present(window, timeout=1.0)
 
         logger.info("Opening the input clip in Avidemux.")
         self._open_input_clip(window, input_video_path)
@@ -749,13 +1007,52 @@ class AvidemuxOperator(SoftwareOperator):
         except UiAutomationError:
             logger.info("Avidemux window is already closed.")
             return
-        bring_window_to_front(window, keep_topmost=False)
-        try:
-            window.close()
-        except Exception:
-            send_hotkey("%{F4}")
-        time.sleep(1.0)
-        dismiss_close_prompts()
+        process_id = self._process_id(window)
+
+        for attempt in range(1, AVIDEMUX_CLOSE_RETRY_COUNT + 1):
+            try:
+                self._dismiss_export_success_dialog_if_present(window, None, timeout=0.8)
+            except Exception:
+                logger.info("Ignoring a transient failure while dismissing the Avidemux completion dialog during close.")
+
+            try:
+                bring_window_to_front(window, keep_topmost=False)
+            except Exception:
+                pass
+            try:
+                window.close()
+            except Exception as exc:
+                logger.info("Avidemux window.close() raised %s. Falling back to WM_CLOSE.", exc)
+                request_window_close(window)
+            time.sleep(AVIDEMUX_CLOSE_SETTLE_SECONDS)
+            dismiss_close_prompts(owner_window=window)
+
+            remaining_windows = self._iter_process_top_level_windows(process_id)
+            if not remaining_windows:
+                logger.info("Avidemux UI closed successfully.")
+                return
+            logger.info(
+                "Avidemux still has visible windows after close attempt %d: %s",
+                attempt,
+                [self._wrapper_text(candidate) or "<untitled>" for candidate in remaining_windows[:5]],
+            )
+
+        if process_id is None:
+            return
+
+        logger.warning("Avidemux still has visible UI after close retries. Terminating process pid=%s.", process_id)
+        subprocess.run(
+            ["taskkill", "/PID", str(process_id), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        deadline = time.monotonic() + AVIDEMUX_CLOSE_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            if not self._iter_process_top_level_windows(process_id):
+                logger.info("Avidemux UI closed after process termination.")
+                return
+            time.sleep(0.1)
 
     def _delete_generated_output_artifact(self, output_video_path: Path, input_video_path: Path) -> None:
         output_resolved = output_video_path.resolve(strict=False)
@@ -897,37 +1194,27 @@ class AvidemuxOperator(SoftwareOperator):
         return False
 
     def _open_input_clip(self, window, input_video_path: Path) -> None:
+        self._dismiss_thanks_popup_if_present(window, timeout=1.0)
         bring_window_to_front(window, keep_topmost=False)
         send_hotkey("^o")
         time.sleep(AVIDEMUX_DIALOG_SETTLE_SECONDS)
-
-        logger.info("Trying direct-path entry in the Avidemux open dialog.")
-        self._focus_dialog_filename_entry(window)
-        paste_text_via_clipboard(str(input_video_path), replace_existing=True)
-        time.sleep(0.4)
-        self._click_hidden_open_confirmation(window)
-        if self._wait_for_loaded_title(input_video_path, timeout=6.0):
-            logger.info("Avidemux loaded the input clip through direct-path entry.")
-            return
-
-        logger.info("Direct-path entry did not load the clip. Falling back to visible file selection.")
-        try:
-            bring_window_to_front(window, keep_topmost=False)
-            send_hotkey("%d")
-            time.sleep(0.2)
-            paste_text_via_clipboard(str(input_video_path.parent), replace_existing=True)
-            time.sleep(0.2)
-            send_hotkey("{ENTER}")
-            time.sleep(1.5)
-        except Exception as exc:
-            logger.info("Avidemux folder-navigation fallback did not complete cleanly: %s", exc)
-
-        file_item = self._visible_file_item(window, input_video_path)
-        file_item.click_input()
-        time.sleep(0.3)
-        self._click_hidden_open_confirmation(window)
-        assert self._wait_for_loaded_title(input_video_path, timeout=15.0), (
-            f"Avidemux did not load the selected input video: {input_video_path}"
+        logger.info("Using the standard Avidemux file dialog to open the input clip.")
+        fill_file_dialog(
+            input_video_path,
+            dialog_patterns=AVIDEMUX_OPEN_DIALOG_PATTERNS,
+            must_exist=True,
+            timeout=AVIDEMUX_DIALOG_TIMEOUT_SECONDS,
+        )
+        open_failure = self._dismiss_open_failure_dialog_if_present(window, timeout=1.5)
+        if open_failure:
+            if self._matches_patterns(open_failure, AVIDEMUX_DEMUXER_FAILURE_PATTERNS):
+                raise AssertionError(
+                    "Avidemux could not load the input clip because its demuxer plugins are unavailable. "
+                    f"Dialog: {open_failure}"
+                )
+            raise AssertionError(f"Avidemux could not open the selected input video: {open_failure}")
+        assert self._wait_for_loaded_content(timeout=15.0), (
+            f"Avidemux did not finish loading the selected input video: {input_video_path}"
         )
 
     def _select_main_combo_value(self, window, *, combo_index: int, target_text: str) -> None:
@@ -1045,7 +1332,7 @@ class AvidemuxOperator(SoftwareOperator):
             return
         logger.info("No embedded Avidemux overwrite prompt appeared.")
 
-    def _wait_for_export_completion(self, output_video_path: Path) -> None:
+    def _wait_for_export_completion(self, output_video_path: Path, window=None) -> None:
         assert output_video_path.parent.exists(), f"Output directory disappeared: {output_video_path.parent}"
 
         stable_rounds = 0
@@ -1053,6 +1340,18 @@ class AvidemuxOperator(SoftwareOperator):
         last_reported_size = -1
         deadline = time.monotonic() + AVIDEMUX_EXPORT_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
+            if window is None:
+                try:
+                    window = self._connect_main_window(timeout=0.5)
+                except UiAutomationError:
+                    window = None
+            if window is not None:
+                try:
+                    if self._dismiss_export_success_dialog_if_present(window, output_video_path, timeout=0.1):
+                        logger.info("Avidemux export completion dialog detected.")
+                        break
+                except Exception as exc:
+                    logger.info("Ignoring an Avidemux completion-dialog probe failure: %s", exc)
             current_size = output_video_path.stat().st_size if output_video_path.exists() else 0
             if current_size != last_reported_size:
                 logger.info(
@@ -1068,6 +1367,11 @@ class AvidemuxOperator(SoftwareOperator):
                 stable_rounds = 0
             last_size = current_size
             if current_size > 0 and stable_rounds >= AVIDEMUX_EXPORT_STABLE_ROUNDS:
+                if window is not None:
+                    try:
+                        self._dismiss_export_success_dialog_if_present(window, output_video_path, timeout=0.1)
+                    except Exception as exc:
+                        logger.info("Ignoring a final Avidemux completion-dialog dismissal failure: %s", exc)
                 logger.info("Avidemux export completion conditions satisfied.")
                 break
             time.sleep(AVIDEMUX_EXPORT_POLL_SECONDS)
@@ -1165,7 +1469,7 @@ class HandBrakeOperator(SoftwareOperator):
         self._start_encode(window, output_video_path)
         self._minimize_window_during_wait(window, phase="encode")
         logger.info("Waiting for the HandBrake encode to finish.")
-        self._wait_for_export_completion(output_video_path)
+        self._wait_for_export_completion(output_video_path, window)
 
         logger.info("Closing HandBrake after encode completion.")
         self.close()
@@ -1181,10 +1485,11 @@ class HandBrakeOperator(SoftwareOperator):
         bring_window_to_front(window, keep_topmost=False)
         try:
             window.close()
-        except Exception:
-            send_hotkey("%{F4}")
+        except Exception as exc:
+            logger.info("HandBrake window.close() raised %s. Falling back to WM_CLOSE.", exc)
+            request_window_close(window)
         time.sleep(1.0)
-        dismiss_close_prompts()
+        dismiss_close_prompts(owner_window=window)
 
     def _delete_generated_output_artifact(self, output_video_path: Path, input_video_path: Path) -> None:
         output_resolved = output_video_path.resolve(strict=False)
@@ -1244,25 +1549,6 @@ class HandBrakeOperator(SoftwareOperator):
         candidates.sort(key=lambda item: item[0], reverse=True)
         return candidates[0][1]
 
-    def _dialog_filename_edit(self, window):
-        candidates = []
-        for wrapper in self._iter_wrapper_tree(window):
-            if self._wrapper_control_type(wrapper).lower() != "edit":
-                continue
-            rect = self._wrapper_rect(wrapper)
-            if rect.top < HAND_BRAKE_FILE_DIALOG_EDIT_TOP_MIN or rect.bottom > HAND_BRAKE_FILE_DIALOG_EDIT_TOP_MAX:
-                continue
-            if rect.left < 600:
-                continue
-            class_name = (getattr(wrapper.element_info, "class_name", "") or "").strip()
-            if class_name == "SearchEditBox":
-                continue
-            width = rect.right - rect.left
-            candidates.append(((width, rect.bottom, rect.left), wrapper))
-        assert candidates, "HandBrake did not expose the embedded open-dialog filename field."
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        return candidates[0][1]
-
     def _save_path_edit(self, window):
         candidates = []
         for wrapper in self._iter_wrapper_tree(window):
@@ -1314,6 +1600,7 @@ class HandBrakeOperator(SoftwareOperator):
         raise AssertionError(f"HandBrake did not finish loading the selected source: {input_video_path}")
 
     def _open_input_clip(self, window, input_video_path: Path) -> None:
+        normalized_input_path = input_video_path.resolve(strict=False)
         start_button = None
         try:
             start_button = self._find_button(window, HAND_BRAKE_SELECT_FILE_PATTERNS)
@@ -1324,26 +1611,18 @@ class HandBrakeOperator(SoftwareOperator):
         logger.info("Clicking the HandBrake source-selection button: %s", self._wrapper_text(start_button) or "<untitled>")
         start_button.click_input()
         time.sleep(HAND_BRAKE_DIALOG_SETTLE_SECONDS)
-
-        edit = self._dialog_filename_edit(window)
-        logger.info("Writing the HandBrake source path into the embedded file picker: %s", input_video_path)
-        try:
-            set_edit_text_value(edit, str(input_video_path))
-        except Exception:
-            self._focus_edit_left_side(window, edit)
-            paste_text_via_clipboard(str(input_video_path), replace_existing=True)
-        time.sleep(0.4)
-
-        open_button = self._find_button(
-            window,
-            HAND_BRAKE_DIALOG_OPEN_PATTERNS,
-            top_min=HAND_BRAKE_FILE_DIALOG_BUTTON_TOP_MIN,
-            top_max=HAND_BRAKE_FILE_DIALOG_BUTTON_TOP_MAX,
-            left_min=1000,
+        logger.info(
+            "Selecting the HandBrake source clip through the standard Windows file dialog: %s",
+            normalized_input_path,
         )
-        logger.info("Clicking the HandBrake embedded open button: %s", self._wrapper_text(open_button) or "<untitled>")
-        open_button.click_input()
-        self._wait_for_source_loaded(input_video_path)
+        fill_file_dialog(
+            normalized_input_path,
+            dialog_patterns=OPEN_DIALOG_PATTERNS,
+            confirm_patterns=HAND_BRAKE_DIALOG_OPEN_PATTERNS,
+            timeout=HAND_BRAKE_DIALOG_TIMEOUT_SECONDS,
+            must_exist=True,
+        )
+        self._wait_for_source_loaded(normalized_input_path)
 
     def _click_tab(self, window, patterns: tuple[str, ...]) -> None:
         candidates = []
@@ -1467,7 +1746,7 @@ class HandBrakeOperator(SoftwareOperator):
                 return title
         return ""
 
-    def _wait_for_export_completion(self, output_video_path: Path) -> None:
+    def _wait_for_export_completion(self, output_video_path: Path, window=None) -> None:
         assert output_video_path.parent.exists(), f"Output directory disappeared: {output_video_path.parent}"
 
         stable_rounds = 0
@@ -1475,10 +1754,16 @@ class HandBrakeOperator(SoftwareOperator):
         last_reported_status = None
         deadline = time.monotonic() + HAND_BRAKE_EXPORT_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
-            window = self._connect_main_window(timeout=2.0)
+            if window is None:
+                window = self._connect_main_window(timeout=2.0)
             current_size = output_video_path.stat().st_size if output_video_path.exists() else 0
-            active_status = self._status_line(window, HAND_BRAKE_ACTIVE_STATUS_PATTERNS)
-            ready_status = self._status_line(window, HAND_BRAKE_READY_STATUS_PATTERNS)
+            try:
+                active_status = self._status_line(window, HAND_BRAKE_ACTIVE_STATUS_PATTERNS)
+                ready_status = self._status_line(window, HAND_BRAKE_READY_STATUS_PATTERNS)
+            except Exception:
+                window = self._connect_main_window(timeout=2.0)
+                active_status = self._status_line(window, HAND_BRAKE_ACTIVE_STATUS_PATTERNS)
+                ready_status = self._status_line(window, HAND_BRAKE_READY_STATUS_PATTERNS)
 
             if current_size > 0 and current_size == last_size:
                 stable_rounds += 1
@@ -2235,10 +2520,10 @@ class ShutterEncoderOperator(SoftwareOperator):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
-                self._connect_main_window(timeout=0.5)
+                window = self._connect_main_window(timeout=0.5)
             except UiAutomationError:
                 return True
-            dismiss_close_prompts(timeout=0.5)
+            dismiss_close_prompts(timeout=0.5, owner_window=window)
             time.sleep(0.2)
         try:
             self._connect_main_window(timeout=0.5)
@@ -2597,6 +2882,7 @@ class ShutterEncoderOperator(SoftwareOperator):
             window.close()
         except Exception as exc:
             logger.info("pywinauto window.close() did not complete Shutter Encoder shutdown: %s", exc)
+            request_window_close(window)
         if self._wait_until_closed(timeout=1.5):
             logger.info("Shutter Encoder closed successfully.")
             return
@@ -2615,9 +2901,9 @@ class ShutterEncoderOperator(SoftwareOperator):
             logger.info("Shutter Encoder closed successfully.")
             return
 
-        logger.info("Falling back to Alt+F4 for Shutter Encoder.")
+        logger.info("Posting WM_CLOSE for Shutter Encoder as a targeted close fallback.")
         bring_window_to_front(window, keep_topmost=False)
-        send_hotkey("%{F4}")
+        request_window_close(window)
         if self._wait_until_closed(timeout=2.0):
             logger.info("Shutter Encoder closed successfully.")
             return
@@ -2641,7 +2927,7 @@ class ShutterEncoderOperator(SoftwareOperator):
             logger.info("Shutter Encoder closed successfully.")
             return
 
-        dismiss_close_prompts(timeout=1.5)
+        dismiss_close_prompts(timeout=1.5, owner_window=window)
         if self._wait_until_closed(timeout=1.0):
             logger.info("Shutter Encoder closed successfully.")
             return
@@ -2714,6 +3000,7 @@ class KdenliveOperator(SoftwareOperator):
         self._render_dialog = None
 
     def perform(self, input_video_path: Path, output_video_path: Path) -> None:
+        output_video_path = output_video_path.resolve(strict=False)
         logger.info("Kdenlive flow started. input=%s output=%s", input_video_path, output_video_path)
         logger.info("Validating Kdenlive input and output paths.")
         assert input_video_path.exists(), f"Input video does not exist: {input_video_path}"
@@ -2721,7 +3008,7 @@ class KdenliveOperator(SoftwareOperator):
         assert output_video_path.suffix.lower() == ".mp4", f"Kdenlive export target must be an mp4 file: {output_video_path}"
 
         logger.info("Connecting to Kdenlive main window.")
-        window = connect_window(self.profile.main_window_title_re, timeout=30.0)
+        window = self._connect_main_window(timeout=max(30.0, SOFTWARE_SPECS["kdenlive"].startup_timeout_seconds))
         self._main_window = window
         bring_window_to_front(window, keep_topmost=False)
 
@@ -2738,7 +3025,7 @@ class KdenliveOperator(SoftwareOperator):
         time.sleep(KDENLIVE_IMPORT_SETTLE_SECONDS)
 
         logger.info("Reconnecting to Kdenlive after import.")
-        window = connect_window(self.profile.main_window_title_re, timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
+        window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
         self._main_window = window
         bring_window_to_front(window, keep_topmost=False)
 
@@ -2773,21 +3060,146 @@ class KdenliveOperator(SoftwareOperator):
                     self._render_dialog.close()
                 except Exception:
                     pass
+            try:
+                logger.info("Handling any Kdenlive save-confirmation dialog triggered by closing the render window.")
+                dismiss_close_prompts(timeout=1.5, owner_window=self._main_window or self._render_dialog)
+            except Exception:
+                logger.exception("Could not dismiss Kdenlive save-confirmation dialog after closing the render window.")
             self._render_dialog = None
         if self._main_window is not None:
+            self._dismiss_profile_switch_prompt_if_present(self._main_window)
             try:
                 bring_window_to_front(self._main_window, keep_topmost=False)
-                self._main_window.close()
-            except Exception:
+                request_window_close(self._main_window)
+            except Exception as exc:
+                logger.info("Posting WM_CLOSE to the Kdenlive main window raised %s.", exc)
                 try:
-                    send_hotkey("%{F4}")
+                    request_window_close(self._main_window)
                 except Exception:
                     pass
-            time.sleep(1.0)
-            dismiss_close_prompts()
+            logger.info("Handling any Kdenlive save-confirmation dialog triggered by closing the main window.")
+            self._dismiss_kdenlive_save_dialog_if_present(self._main_window, timeout=3.0)
+            dismiss_close_prompts(timeout=1.5, owner_window=self._main_window)
+            if not self._wait_for_main_window_to_close(timeout=3.0):
+                process_id = self._process_id(self._main_window)
+                if process_id is not None:
+                    logger.warning(
+                        "Kdenlive still has visible UI after save-dismissal retries. Terminating process pid=%s.",
+                        process_id,
+                    )
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process_id), "/T", "/F"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
             self._main_window = None
             return
         super().close()
+
+    def _process_id(self, window) -> int | None:
+        try:
+            process_id = getattr(getattr(window, "element_info", None), "process_id", None)
+        except Exception:
+            return None
+        return int(process_id) if process_id else None
+
+    def _iter_process_top_level_windows(self, process_id: int | None):
+        if process_id is None:
+            return []
+        from pywinauto import Desktop
+
+        matches = []
+        for window in Desktop(backend="uia").windows():
+            try:
+                pid = int(getattr(getattr(window, "element_info", None), "process_id", 0) or 0)
+            except Exception:
+                continue
+            if pid != process_id:
+                continue
+            try:
+                if not window.is_visible():
+                    continue
+            except Exception:
+                pass
+            try:
+                rect = self._wrapper_rect(window)
+                area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+            except Exception:
+                area = 0
+            matches.append((-area, self._wrapper_text(window).casefold(), window))
+        matches.sort(key=lambda item: (item[0], item[1]))
+        return [item[2] for item in matches]
+
+    def _wait_for_main_window_to_close(self, timeout: float = 3.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                self._connect_main_window(timeout=0.5)
+            except UiAutomationError:
+                return True
+            time.sleep(0.2)
+        return False
+
+    def _dialog_matches(self, dialog, *, title_patterns: tuple[str, ...], text_patterns: tuple[str, ...]) -> bool:
+        title = self._wrapper_text(dialog)
+        if title and self._matches_patterns(title, title_patterns):
+            return True
+        return self._control_present(
+            dialog,
+            text_patterns,
+            control_types=("Text", "Pane", "Group", "Document", "Custom"),
+        )
+
+    def _dismiss_kdenlive_save_dialog_if_present(self, owner_window, *, timeout: float = 3.0) -> bool:
+        process_id = self._process_id(owner_window)
+        owner_handle = getattr(owner_window, "handle", None)
+        deadline = time.monotonic() + timeout
+        dismissed = False
+        while time.monotonic() < deadline:
+            dialog = None
+            for candidate in self._iter_process_top_level_windows(process_id):
+                if owner_handle is not None and getattr(candidate, "handle", None) == owner_handle:
+                    continue
+                if not self._dialog_matches(
+                    candidate,
+                    title_patterns=KDENLIVE_WARNING_DIALOG_PATTERNS,
+                    text_patterns=KDENLIVE_SAVE_CHANGES_TEXT_PATTERNS,
+                ):
+                    continue
+                dialog = candidate
+                break
+            if dialog is None:
+                return dismissed
+            try:
+                bring_window_to_front(dialog, keep_topmost=False)
+            except Exception:
+                pass
+            button = self._first_matching_control(dialog, KDENLIVE_DONT_SAVE_PATTERNS, control_types=("Button",))
+            if button is None:
+                logger.info("Kdenlive save dialog was found, but the 'Don't Save' button was not exposed.")
+                return dismissed
+            logger.info("Clicking the Kdenlive 'Don't Save' button.")
+            button.click_input()
+            dismissed = True
+            time.sleep(0.5)
+        return dismissed
+
+    def _dismiss_profile_switch_prompt_if_present(self, window) -> bool:
+        if not self._control_present(
+            window,
+            KDENLIVE_PROFILE_SWITCH_TEXT_PATTERNS,
+            control_types=("Text", "Pane", "Group", "Document", "Custom"),
+        ):
+            return False
+        cancel_button = self._first_matching_control(window, KDENLIVE_DIALOG_CANCEL_PATTERNS, control_types=("Button",))
+        if cancel_button is None:
+            logger.info("Kdenlive profile-switch prompt was detected, but the Cancel button was not exposed.")
+            return False
+        logger.info("Cancelling the Kdenlive profile-switch prompt before shutdown.")
+        cancel_button.click_input()
+        time.sleep(0.5)
+        return True
 
     def _open_import_dialog(self, window) -> None:
         try:
@@ -3107,6 +3519,13 @@ class KdenliveOperator(SoftwareOperator):
             active = active_text_present or abort_enabled
         return active, abort_enabled, start_enabled, clean_up_enabled, progress_ratio
 
+    def _render_marked_finished(self, render_dialog) -> bool:
+        return self._control_present(
+            render_dialog,
+            KDENLIVE_FINISHED_RENDER_PATTERNS,
+            control_types=("Text", "Pane", "Group", "Custom", "Document", "ListItem", "DataItem"),
+        )
+
     def _open_render_dialog(self, window):
         logger.info("Opening Kdenlive rendering dialog with Ctrl+Enter.")
         bring_window_to_front(window, keep_topmost=False)
@@ -3202,6 +3621,7 @@ class KdenliveOperator(SoftwareOperator):
         time.sleep(0.25)
 
     def _set_render_output_path(self, render_dialog, output_video_path: Path) -> None:
+        output_video_path = output_video_path.resolve(strict=False)
         logger.info("Waiting for Kdenlive output-file edit control.")
         self._focus_output_file_entry(render_dialog)
         logger.info("Pasting Kdenlive render output path via clipboard: %s", output_video_path)
@@ -3226,6 +3646,7 @@ class KdenliveOperator(SoftwareOperator):
         accept_overwrite_confirmation(timeout=2.0, owner_window=render_dialog, poll_interval=0.05)
 
     def _wait_for_render_completion(self, render_dialog, output_video_path: Path) -> None:
+        output_video_path = output_video_path.resolve(strict=False)
         logger.info("Validating Kdenlive output directory before render wait.")
         assert output_video_path.parent.exists(), f"Output directory disappeared: {output_video_path.parent}"
         self._show_job_queue_tab(render_dialog)
@@ -3233,6 +3654,7 @@ class KdenliveOperator(SoftwareOperator):
 
         stable_rounds = 0
         inactive_rounds = 0
+        finished_without_output_rounds = 0
         last_size = -1
         deadline = time.monotonic() + 7200.0
         last_status = None
@@ -3245,16 +3667,23 @@ class KdenliveOperator(SoftwareOperator):
             last_size = current_size
 
             render_active, abort_enabled, start_enabled, clean_up_enabled, progress_ratio = self._render_still_active(render_dialog)
+            render_finished = self._render_marked_finished(render_dialog)
             if render_active:
                 inactive_rounds = 0
             else:
                 inactive_rounds += 1
+            if render_finished and current_size < KDENLIVE_MIN_OUTPUT_BYTES:
+                finished_without_output_rounds += 1
+            else:
+                finished_without_output_rounds = 0
 
             status = (
                 current_size,
                 stable_rounds,
                 inactive_rounds,
+                finished_without_output_rounds,
                 render_active,
+                render_finished,
                 abort_enabled,
                 start_enabled,
                 clean_up_enabled,
@@ -3262,18 +3691,45 @@ class KdenliveOperator(SoftwareOperator):
             )
             if status != last_status:
                 logger.info(
-                    "Kdenlive render state. output=%s size_bytes=%d stable_rounds=%d inactive_rounds=%d active=%s abort_enabled=%s start_enabled=%s clean_up_enabled=%s progress_ratio=%s",
+                    "Kdenlive render state. output=%s size_bytes=%d stable_rounds=%d inactive_rounds=%d finished_without_output_rounds=%d active=%s finished=%s abort_enabled=%s start_enabled=%s clean_up_enabled=%s progress_ratio=%s",
                     output_video_path,
                     current_size,
                     stable_rounds,
                     inactive_rounds,
+                    finished_without_output_rounds,
                     render_active,
+                    render_finished,
                     abort_enabled,
                     start_enabled,
                     clean_up_enabled,
                     "n/a" if progress_ratio is None else f"{progress_ratio:.3f}",
                 )
                 last_status = status
+
+            if render_finished and current_size >= KDENLIVE_MIN_OUTPUT_BYTES:
+                logger.info("Kdenlive render completion detected from the Job Queue finished state.")
+                break
+
+            if render_finished and finished_without_output_rounds >= 5:
+                raise AssertionError(
+                    "Kdenlive reported that rendering finished, but the expected output file was not found: "
+                    f"{output_video_path}"
+                )
+
+            if (
+                current_size >= KDENLIVE_MIN_OUTPUT_BYTES
+                and stable_rounds >= KDENLIVE_FALLBACK_COMPLETION_STABLE_ROUNDS
+                and inactive_rounds >= KDENLIVE_FALLBACK_COMPLETION_IDLE_ROUNDS
+                and not render_active
+            ):
+                logger.info(
+                    "Kdenlive render completion detected from the stable-output fallback. "
+                    "size_bytes=%d stable_rounds=%d inactive_rounds=%d",
+                    current_size,
+                    stable_rounds,
+                    inactive_rounds,
+                )
+                break
 
             if (
                 current_size >= KDENLIVE_MIN_OUTPUT_BYTES

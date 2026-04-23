@@ -26,6 +26,77 @@ Supported software:
 pip install -r requirements.txt
 ```
 
+The initialization script now also writes clearer run artifacts:
+
+```powershell
+initialize_environment.cmd
+```
+
+Artifact paths:
+
+- `results/initialize_environment_runs/<timestamp>/initialize_summary.md`
+- `results/initialize_environment_runs/<timestamp>/initialize_progress.jsonl`
+- `results/initialize_environment_runs/<timestamp>/initialize_environment.log`
+
+Use them as follows:
+
+- `initialize_summary.md`: quick status view for the current initialization run
+- `initialize_progress.jsonl`: structured machine-readable event stream
+- `initialize_environment.log`: full detailed log file
+
+## Pytest Workflow
+
+The repository now includes two `pytest` layers:
+
+- `pytest`: run only the fast unit tests without launching desktop applications
+- `pytest -m e2e ... --run-e2e`: run workflow 1 and execute the baseline pass for `shotcut`, `kdenlive`, `shutter_encoder`, `avidemux`, `handbrake`, and `blender`
+- `pytest -m "e2e and ai_turbo" ... --run-e2e --run-ai-turbo`: run workflow 1 + workflow 2; the second pass starts AI Turbo Engine, enables `Performance Boost`, checks the matching app, and generates an xlsx report with a `Comparison` sheet
+
+The `Comparison` sheet writes the improvement formula automatically:
+
+- `improvement_percent = (baseline_duration_seconds - turbo_duration_seconds) / baseline_duration_seconds`
+
+Common commands:
+
+```powershell
+python -m pytest
+python -m pytest -m e2e tests/e2e/test_full_pipeline_workflow.py --run-e2e --pipeline-results-root results/pytest_runs
+python -m pytest -m "e2e and ai_turbo" tests/e2e/test_full_pipeline_workflow.py --run-e2e --run-ai-turbo --pipeline-results-root results/pytest_runs
+```
+
+Common optional arguments:
+
+- `--pipeline-workload-name`
+- `--pipeline-input-video`
+- `--pipeline-blend-file`
+- `--pipeline-blender-exe`
+- `--pipeline-software`
+- `--pytest-artifacts-root`
+
+`pytest` now writes two clearer report layers:
+
+- session summary: `results/pytest_reports/<timestamp>/session_summary.md`
+- full session log: `results/pytest_reports/<timestamp>/pytest_session.log`
+- per-pipeline progress summary: `results/pytest_runs/<run>/pipeline_summary.md`
+- per-pipeline structured event stream: `results/pytest_runs/<run>/pipeline_progress.jsonl`
+
+Use them as follows:
+
+- `session_summary.md`: quick pass/fail overview, durations, and artifact paths
+- `pipeline_summary.md`: current workflow position plus per-software success/failure
+- `pipeline_progress.jsonl`: structured machine-readable event timeline
+
+The terminal also prints concise live progress lines such as:
+
+```text
+[pipeline][started] case variant=baseline software=shotcut
+[pipeline][completed] case variant=baseline software=shotcut csv=...
+[pipeline][started] report report=...
+[pipeline][completed] pipeline report=...
+```
+
+If AI Turbo Engine is not installed on the current machine yet, run the baseline command first and keep the `ai_turbo` command for later.
+
 ## Main Commands
 
 List supported software:

@@ -29,6 +29,7 @@ AVIDEMUX_TIMESTAMP_PATTERN = re.compile(r"(?P<clock>\d{2}:\d{2}:\d{2})-(?P<milli
 AVIDEMUX_PRIMARY_START_MARKERS = ("[A_Save] Saving..",)
 AVIDEMUX_FALLBACK_START_MARKERS = ("[FF] Saving",)
 AVIDEMUX_END_MARKERS = ("End of flush",)
+AVIDEMUX_COMPLETION_SETTLE_SECONDS = 1.0
 HANDBRAKE_ENCODE_FILENAME_PATTERN = re.compile(r"_encode_", re.IGNORECASE)
 HANDBRAKE_ENCODE_MARKERS = (
     "# Starting Encode ...",
@@ -270,6 +271,22 @@ def should_wait_for_completion(profile: LogProfile, live_preview: dict[str, obje
             live_preview.get("capture_complete", False)
         )
     return False
+
+
+def should_finalize_avidemux_completed_capture(
+    profile: LogProfile,
+    live_preview: dict[str, object],
+    *,
+    completion_detected_at: Optional[float],
+    now_monotonic: float,
+) -> bool:
+    if profile.parser_kind != "avidemux_elapsed":
+        return False
+    if not bool(live_preview.get("capture_complete", False)):
+        return False
+    if completion_detected_at is None:
+        return False
+    return now_monotonic - completion_detected_at >= AVIDEMUX_COMPLETION_SETTLE_SECONDS
 
 
 def extract_avidemux_elapsed_seconds(lines: list[str]) -> tuple[Optional[float], str]:
@@ -782,6 +799,7 @@ def monitor_single_log_file(
     last_change_at: Optional[datetime] = None
     finalized_row: Optional[dict[str, str]] = None
     last_preview_signature: Optional[tuple[object, ...]] = None
+    completion_detected_at: Optional[float] = None
 
     emit_progress(
         progress_callback,
@@ -830,6 +848,7 @@ def monitor_single_log_file(
                     pending_text = ""
                     first_change_at = None
                     last_change_at = None
+                    completion_detected_at = None
 
                 if current_size > baseline_offset:
                     chunk, baseline_offset = read_file_segment(chosen_path, baseline_offset)
@@ -862,6 +881,48 @@ def monitor_single_log_file(
                                 **live_preview,
                             )
                             last_preview_signature = preview_signature
+                        if profile.parser_kind == "avidemux_elapsed":
+                            if bool(live_preview.get("capture_complete", False)):
+                                completion_detected_at = completion_detected_at or time.monotonic()
+                            else:
+                                completion_detected_at = None
+
+            if captured_lines and profile.parser_kind == "avidemux_elapsed":
+                final_lines = finalize_captured_lines(captured_lines, pending_text)
+                live_preview = build_live_log_preview(profile, source_path, final_lines)
+                now_monotonic = time.monotonic()
+                if bool(live_preview.get("capture_complete", False)) and completion_detected_at is None:
+                    completion_detected_at = now_monotonic
+                if should_finalize_avidemux_completed_capture(
+                    profile,
+                    live_preview,
+                    completion_detected_at=completion_detected_at,
+                    now_monotonic=now_monotonic,
+                ):
+                    emit_progress(
+                        progress_callback,
+                        progress_state="complete_data_captured",
+                        progress_message="Captured the final Avidemux elapsed marker; finalizing without waiting for trailing cleanup logs.",
+                        current_source_path=source_path,
+                        captured_line_count=len(captured_lines),
+                        last_log_activity_at=isoformat_or_empty(last_change_at),
+                        capture_detected=bool(live_preview.get("capture_detected", False)),
+                        capture_complete=True,
+                        preview_status=str(live_preview.get("preview_status", "")),
+                        preview_started_at=str(live_preview.get("preview_started_at", "")),
+                        preview_ended_at=str(live_preview.get("preview_ended_at", "")),
+                        preview_duration_seconds=str(live_preview.get("preview_duration_seconds", "")),
+                        preview_evidence=str(live_preview.get("preview_evidence", "")),
+                    )
+                    finalized_row = build_log_result(
+                        profile=profile,
+                        session_id=session_id,
+                        source_path=source_path,
+                        lines=final_lines,
+                        row_status="ok",
+                        base_notes=profile.notes,
+                    )
+                    break
 
             if captured_lines and last_change_at is not None:
                 if (now_local() - last_change_at).total_seconds() >= idle_seconds:

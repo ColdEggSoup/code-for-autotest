@@ -30,13 +30,18 @@ from monitoring_common import (
     summarize_result_statuses,
 )
 from process_listener import PROCESS_PROFILES, run_process_listener
-from ui_automation import UiAutomationError, set_performance_boost_selection
+from ui_automation import UiAutomationError, minimize_window, set_performance_boost_selection
 from xlsx_report_generator import generate_xlsx_report
 
 
 ALL_SOFTWARE = sorted(list(PROCESS_PROFILES) + list(LOG_PROFILES) + ["blender"])
 RUN_SESSION_PATTERN = re.compile(r"^(?P<base>.+?)_run(?P<index>\d+)$", re.IGNORECASE)
 INVALID_NAME_CHARS_PATTERN = re.compile(r'[<>:"/\\|?*\s]+')
+SCRIPT_ROOT = Path(__file__).resolve().parent
+BLENDER_VISIBLE_EXIT_GRACE_SECONDS = 5.0
+BLENDER_VISIBLE_POLL_SECONDS = 0.5
+BLENDER_VISIBLE_FORCE_EXIT_WAIT_SECONDS = 10.0
+BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS = 30.0
 
 
 def get_monitor_type(software: str) -> str:
@@ -97,11 +102,16 @@ def default_csv_root() -> Path:
     return expand_path("results/csv")
 
 
-def default_blender_executable() -> Path:
-    candidates = [
+def default_blender_executable_candidates() -> tuple[Path, ...]:
+    return (
+        (SCRIPT_ROOT / "software" / "blender" / "blender.exe").resolve(strict=False),
         expand_path(r"C:/Program Files/Blender Foundation/Blender 4.5/blender.exe"),
         expand_path(r"C:/Program Files/Blender Foundation/Blender/blender.exe"),
-    ]
+    )
+
+
+def default_blender_executable() -> Path:
+    candidates = list(default_blender_executable_candidates())
     for candidate in candidates:
         if candidate.exists():
             return candidate
@@ -133,22 +143,28 @@ def build_blender_command(args: argparse.Namespace, record: dict) -> list[str]:
     listener_script = default_blender_listener_script()
     if not listener_script.exists():
         raise FileNotFoundError(f"Blender listener script was not found: {listener_script}")
+    blender_ui_mode = str(getattr(args, "blender_ui_mode", "visible") or "visible")
+    if blender_ui_mode not in {"visible", "headless"}:
+        raise ValueError(f"Unsupported Blender UI mode: {blender_ui_mode}")
 
-    command = [
-        str(blender_exe),
-        "-b",
+    command = [str(blender_exe)]
+    if blender_ui_mode == "headless":
+        command.append("-b")
+    command.extend([
         str(blend_file),
-    ]
+        "--python",
+        str(listener_script),
+    ])
     if args.render_mode == "animation":
         command.append("-a")
     else:
         command.extend(["-f", str(args.frame)])
     command.extend([
-        "--python",
-        str(listener_script),
         "--",
         str(record["output_path"]),
         str(record["session_id"]),
+        "",
+        blender_ui_mode,
     ])
     return command
 
@@ -161,9 +177,90 @@ def count_csv_rows(csv_path: Path) -> int:
         return sum(1 for _ in reader)
 
 
+def _import_pywinauto_desktop():
+    try:
+        from pywinauto import Desktop
+    except ImportError as exc:
+        raise UiAutomationError("pywinauto is required to control the Blender window.") from exc
+    return Desktop
+
+
+def find_visible_window_for_pid(process_id: int, *, timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS):
+    assert process_id > 0, "process_id must be positive."
+    Desktop = _import_pywinauto_desktop()
+    deadline = time.monotonic() + timeout
+    last_titles: list[str] = []
+    while time.monotonic() < deadline:
+        candidates = []
+        windows = Desktop(backend="uia").windows()
+        for window in windows:
+            try:
+                pid = int(getattr(getattr(window, "element_info", None), "process_id", 0) or 0)
+            except Exception:
+                continue
+            if pid != process_id:
+                continue
+            try:
+                if not window.is_visible():
+                    continue
+            except Exception:
+                pass
+            try:
+                title = (window.window_text() or "").strip()
+            except Exception:
+                title = ""
+            if title:
+                last_titles.append(title)
+            try:
+                rect = window.rectangle()
+                area = max(0, rect.width() * rect.height())
+            except Exception:
+                area = 0
+            candidates.append((-area, title.casefold(), window))
+        if candidates:
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            return candidates[0][2]
+        time.sleep(0.25)
+    raise UiAutomationError(
+        f"Could not find a visible top-level window for Blender pid={process_id}. Seen titles: {last_titles[:10]}"
+    )
+
+
+def minimize_visible_blender_window(process_id: int, *, timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS) -> None:
+    window = find_visible_window_for_pid(process_id, timeout=timeout)
+    minimize_window(window)
+
+
+def terminate_process_tree(process: subprocess.Popen[object], *, wait_seconds: float = BLENDER_VISIBLE_FORCE_EXIT_WAIT_SECONDS) -> int | None:
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=wait_seconds,
+        )
+    except Exception:
+        pass
+
+    try:
+        process.kill()
+    except Exception:
+        pass
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        returncode = process.poll()
+        if returncode is not None:
+            return returncode
+        time.sleep(0.1)
+    return process.poll()
+
+
 def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict) -> int:
     output_path = Path(record["output_path"])
     command = build_blender_command(args, record)
+    blender_ui_mode = getattr(args, "blender_ui_mode", "visible") or "visible"
     save_session_status(
         state_path,
         record,
@@ -171,7 +268,7 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
         pid=None,
         started_at=now_local().isoformat(timespec="milliseconds"),
         progress_state="waiting_for_render_activity",
-        progress_message="Launching Blender background render.",
+        progress_message="Launching Blender render.",
         progress_updated_at=now_local().isoformat(timespec="milliseconds"),
         current_source_path=args.blend_file,
     )
@@ -182,10 +279,44 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
     print(f"output_path={record['output_path']}")
     print(f"blender_exe={resolve_blender_executable(args.blender_exe)}")
     print(f"blend_file={resolve_blend_file(args.blend_file)}")
+    print(f"blender_ui_mode={blender_ui_mode}")
     print("Launching Blender...", flush=True)
+    process: subprocess.Popen[object] | None = None
+    forced_exit_after_capture = False
+    returncode: int | None = None
     try:
-        completed = subprocess.run(command, cwd=str(Path.cwd()), check=False)
+        process = subprocess.Popen(command, cwd=str(Path.cwd()))
+        save_session_status(state_path, record, pid=process.pid)
+        if blender_ui_mode == "visible":
+            try:
+                minimize_visible_blender_window(process.pid)
+                print("Minimized the visible Blender window.", flush=True)
+            except Exception as exc:
+                print(f"Could not minimize the visible Blender window automatically: {exc}", flush=True)
+        while True:
+            returncode = process.poll()
+            row_count = count_csv_rows(output_path)
+            if returncode is not None:
+                break
+            if blender_ui_mode == "visible" and row_count > 0:
+                print(
+                    "Detected completed Blender render output. Waiting briefly for the visible Blender window to exit.",
+                    flush=True,
+                )
+                try:
+                    returncode = process.wait(timeout=BLENDER_VISIBLE_EXIT_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    print(
+                        "Visible Blender did not exit after render completion. Terminating the Blender process.",
+                        flush=True,
+                    )
+                    forced_exit_after_capture = True
+                    returncode = terminate_process_tree(process)
+                break
+            time.sleep(BLENDER_VISIBLE_POLL_SECONDS)
     except KeyboardInterrupt:
+        if process is not None and process.poll() is None:
+            terminate_process_tree(process)
         save_session_status(
             state_path,
             record,
@@ -200,7 +331,8 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
         return 130
 
     row_count = count_csv_rows(output_path)
-    final_status = "completed" if completed.returncode == 0 and row_count > 0 else "completed_with_warnings"
+    successful_completion = row_count > 0 and ((returncode or 0) == 0 or forced_exit_after_capture)
+    final_status = "completed" if successful_completion else "completed_with_warnings"
     result_statuses = ["ok"] if row_count > 0 else []
     save_session_status(
         state_path,
@@ -209,7 +341,7 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
         ended_at=now_local().isoformat(timespec="milliseconds"),
         row_count=row_count,
         result_statuses=result_statuses,
-        error="" if completed.returncode == 0 else f"Blender exited with code {completed.returncode}",
+        error="" if successful_completion else f"Blender exited with code {returncode}",
         xlsx_output_path="",
         xlsx_status="not_generated",
         xlsx_csv_count=0,
@@ -224,7 +356,7 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
         progress_updated_at=now_local().isoformat(timespec="milliseconds"),
     )
     print(f"Blender finished. Wrote {row_count} row(s) to {output_path}", flush=True)
-    return 0 if completed.returncode == 0 and row_count > 0 else 2
+    return 0 if successful_completion else 2
 
 
 def guess_initial_log_source(software: str, options: dict) -> str:
@@ -888,6 +1020,12 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument("--log-path", default="", help="Optional log path override for avidemux or handbrake.")
     start_parser.add_argument("--blender-exe", default="", help="Optional Blender executable path. Only used when --software blender.")
     start_parser.add_argument("--blend-file", default="", help="Blend file path. Required when --software blender.")
+    start_parser.add_argument(
+        "--blender-ui-mode",
+        choices=("visible", "headless"),
+        default="visible",
+        help="Whether Blender should render with a visible UI window or in headless background mode.",
+    )
     start_parser.add_argument("--render-mode", choices=("frame", "animation"), default="frame", help="Blender render mode. Only used when --software blender.")
     start_parser.add_argument("--frame", type=int, default=1, help="Blender frame number when --render-mode frame is used.")
     start_parser.add_argument("--poll-interval", type=float, default=0.5, help=argparse.SUPPRESS)
@@ -906,6 +1044,7 @@ def build_parser() -> argparse.ArgumentParser:
     start_bg_parser.add_argument("--log-path", default="", help="Optional log path override for avidemux or handbrake.")
     start_bg_parser.add_argument("--blender-exe", default="", help=argparse.SUPPRESS)
     start_bg_parser.add_argument("--blend-file", default="", help=argparse.SUPPRESS)
+    start_bg_parser.add_argument("--blender-ui-mode", choices=("visible", "headless"), default="visible", help=argparse.SUPPRESS)
     start_bg_parser.add_argument("--render-mode", choices=("frame", "animation"), default="frame", help=argparse.SUPPRESS)
     start_bg_parser.add_argument("--frame", type=int, default=1, help=argparse.SUPPRESS)
     start_bg_parser.add_argument("--poll-interval", type=float, default=0.5, help=argparse.SUPPRESS)
