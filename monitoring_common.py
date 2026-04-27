@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -206,8 +207,12 @@ def write_rows(csv_path: Path, rows: list[dict[str, str]]) -> None:
 
 def save_json(path: Path, payload: dict) -> None:
     ensure_parent_directory(path)
-    with path.open("w", encoding="utf-8") as handle:
+    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp_path, path)
 
 
 def load_json(path: Path) -> dict:

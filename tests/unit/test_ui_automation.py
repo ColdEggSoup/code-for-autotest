@@ -4,29 +4,68 @@ import ui_automation
 
 
 class _DummyRect:
-    def __init__(self, *, top: int, left: int) -> None:
+    def __init__(self, *, top: int, left: int, right: int | None = None, bottom: int | None = None) -> None:
         self.top = top
         self.left = left
+        self.right = right if right is not None else left + 120
+        self.bottom = bottom if bottom is not None else top + 30
 
 
 class _DummyElementInfo:
-    def __init__(self, process_id: int, *, handle: int | None = None) -> None:
+    def __init__(
+        self,
+        process_id: int,
+        *,
+        handle: int | None = None,
+        control_type: str = "",
+        class_name: str = "",
+    ) -> None:
         self.process_id = process_id
         self.handle = handle
+        self.control_type = control_type
+        self.class_name = class_name
 
 
 class _DummyWindow:
-    def __init__(self, title: str, process_id: int, *, top: int, left: int, handle: int | None = None) -> None:
+    def __init__(
+        self,
+        title: str,
+        process_id: int,
+        *,
+        top: int,
+        left: int,
+        right: int | None = None,
+        bottom: int | None = None,
+        handle: int | None = None,
+        control_type: str = "",
+        class_name: str = "",
+    ) -> None:
         self._title = title
-        self._rect = _DummyRect(top=top, left=left)
-        self.element_info = _DummyElementInfo(process_id, handle=handle)
+        self._rect = _DummyRect(top=top, left=left, right=right, bottom=bottom)
+        self.element_info = _DummyElementInfo(
+            process_id,
+            handle=handle,
+            control_type=control_type,
+            class_name=class_name,
+        )
         self.handle = handle
+        self._children: list[_DummyWindow] = []
 
     def window_text(self) -> str:
         return self._title
 
     def rectangle(self) -> _DummyRect:
         return self._rect
+
+    def children(self) -> list["_DummyWindow"]:
+        return list(self._children)
+
+    def descendants(self) -> list["_DummyWindow"]:
+        descendants: list[_DummyWindow] = []
+        for child in self._children:
+            descendants.append(child)
+            descendants.extend(child.descendants())
+        return descendants
 
 
 class _DummyDesktop:
@@ -51,6 +90,46 @@ class _DummyMethodWindow:
 
     def handle(self) -> int:
         return self._handle
+
+
+class _DummyClickableControl:
+    def __init__(self, *, title: str = "Control", control_type: str = "Button") -> None:
+        self._title = title
+        self._control_type = control_type
+        self.invoke_calls = 0
+        self.click_input_calls = 0
+
+        self.element_info = type(
+            "ElementInfo",
+            (),
+            {
+                "control_type": control_type,
+                "class_name": "",
+            },
+        )()
+
+    def window_text(self) -> str:
+        return self._title
+
+    def invoke(self) -> None:
+        self.invoke_calls += 1
+
+    def click_input(self) -> None:
+        self.click_input_calls += 1
+
+
+class _DummyInputOnlyControl(_DummyClickableControl):
+    def invoke(self) -> None:
+        raise NotImplementedError("invoke unavailable")
+
+
+class _DummyDesktopErrorControl(_DummyClickableControl):
+    def invoke(self) -> None:
+        raise NotImplementedError("invoke unavailable")
+
+    def click_input(self) -> None:
+        self.click_input_calls += 1
+        raise RuntimeError("There is no active desktop required for moving mouse cursor!\n")
 
 
 def test_dismiss_close_prompts_only_handles_owner_process(monkeypatch) -> None:
@@ -146,3 +225,78 @@ def test_request_window_close_ignores_disappeared_window(monkeypatch) -> None:
 
     assert closed is False
     assert visibility_checks == [5566]
+
+
+def test_click_text_control_uses_click_input(monkeypatch) -> None:
+    control = _DummyClickableControl()
+
+    monkeypatch.setattr(ui_automation, "find_text_control", lambda *args, **kwargs: control)
+    monkeypatch.setattr(ui_automation.time, "sleep", lambda _seconds: None)
+
+    ui_automation.click_text_control(object(), r"^Control$")
+
+    assert control.invoke_calls == 0
+    assert control.click_input_calls == 1
+
+
+def test_click_control_falls_back_to_click_input(monkeypatch) -> None:
+    control = _DummyInputOnlyControl()
+
+    monkeypatch.setattr(ui_automation.time, "sleep", lambda _seconds: None)
+
+    ui_automation.click_control(control)
+
+    assert control.click_input_calls == 1
+
+
+def test_click_control_reports_inactive_desktop_as_ui_automation_error(monkeypatch) -> None:
+    control = _DummyDesktopErrorControl()
+
+    monkeypatch.setattr(ui_automation.time, "sleep", lambda _seconds: None)
+
+    try:
+        ui_automation.click_control(control)
+    except ui_automation.UiAutomationError as exc:
+        assert "interactive desktop" in str(exc)
+    else:
+        raise AssertionError("Expected click_control to raise UiAutomationError when click_input needs an active desktop.")
+
+
+def test_find_file_dialog_edit_prefers_lower_input_near_confirm_button() -> None:
+    dialog = _DummyWindow("Open", 2002, top=0, left=0, right=1000, bottom=700, control_type="Window")
+    location_edit = _DummyWindow("", 2002, top=90, left=180, right=820, bottom=120, control_type="Edit")
+    filename_combo = _DummyWindow("", 2002, top=560, left=180, right=820, bottom=595, control_type="ComboBox")
+    confirm_button = _DummyWindow("Open", 2002, top=560, left=850, right=940, bottom=595, control_type="Button")
+    dialog._children = [location_edit, filename_combo, confirm_button]
+
+    resolved = ui_automation._find_file_dialog_edit(dialog, (r"^Open$",))
+
+    assert resolved is filename_combo
+
+
+def test_fill_file_dialog_uses_bottom_filename_input_when_label_missing(monkeypatch, tmp_path) -> None:
+    file_path = tmp_path / "input.mp4"
+    file_path.write_bytes(b"video")
+    dialog = _DummyWindow("Open", 2002, top=0, left=0, right=1000, bottom=700, handle=5566, control_type="Window")
+    location_edit = _DummyWindow("", 2002, top=90, left=180, right=820, bottom=120, control_type="Edit")
+    filename_combo = _DummyWindow("", 2002, top=560, left=180, right=820, bottom=595, control_type="ComboBox")
+    confirm_button = _DummyWindow("Open", 2002, top=560, left=850, right=940, bottom=595, control_type="Button")
+    dialog._children = [location_edit, filename_combo, confirm_button]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(ui_automation, "wait_for_file_dialog", lambda **kwargs: dialog)
+    monkeypatch.setattr(ui_automation, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ui_automation, "_dialog_contains_file", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        ui_automation,
+        "_set_edit_value",
+        lambda edit_wrapper, value: captured.update({"edit": edit_wrapper, "value": value}),
+    )
+    monkeypatch.setattr(ui_automation, "click_control", lambda control, post_click_sleep=0.4: captured.setdefault("confirm", control))
+    monkeypatch.setattr(ui_automation, "_wait_for_window_to_close", lambda *args, **kwargs: True)
+
+    ui_automation.fill_file_dialog(file_path, confirm_patterns=(r"^Open$",), must_exist=True)
+
+    assert captured["edit"] is filename_combo
+    assert str(captured["value"]).endswith("input.mp4")
+    assert captured["confirm"] is confirm_button

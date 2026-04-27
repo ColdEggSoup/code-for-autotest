@@ -9,6 +9,8 @@ Extra args after `--`:
     2. session id
     3. optional json status path
     4. optional ui mode: visible or headless
+    5. optional render mode: frame or animation
+    6. optional frame number
 """
 
 from __future__ import annotations
@@ -53,9 +55,12 @@ STATE = {
     "started_at": None,
     "status_path": None,
     "ui_mode": None,
+    "render_mode": None,
+    "render_frame": None,
     "row_count": 0,
     "last_row_status": "",
     "quit_requested": False,
+    "render_requested": False,
 }
 
 
@@ -321,6 +326,41 @@ def get_ui_mode() -> str:
     return ui_mode
 
 
+def get_render_mode() -> str:
+    if STATE["render_mode"] is not None:
+        return str(STATE["render_mode"])
+
+    extra_args = parse_extra_args()
+    if len(extra_args) >= 5 and extra_args[4] in {"frame", "animation"}:
+        render_mode = extra_args[4]
+    else:
+        render_mode = "frame"
+    STATE["render_mode"] = render_mode
+    return render_mode
+
+
+def get_render_frame() -> int:
+    if STATE["render_frame"] is not None:
+        return int(STATE["render_frame"])
+
+    extra_args = parse_extra_args()
+    if len(extra_args) >= 6:
+        try:
+            frame_value = int(extra_args[5])
+        except ValueError:
+            frame_value = -1
+        if frame_value >= 0:
+            STATE["render_frame"] = frame_value
+            return frame_value
+
+    try:
+        frame_value = int(getattr(bpy.context.scene, "frame_current", 1) or 1)
+    except Exception:
+        frame_value = 1
+    STATE["render_frame"] = frame_value
+    return frame_value
+
+
 def should_auto_quit_after_capture() -> bool:
     return get_ui_mode() == "visible"
 
@@ -337,6 +377,19 @@ def append_row(row: dict[str, str]) -> None:
 
 def reset_started_at() -> None:
     STATE["started_at"] = None
+
+
+def _request_quit_without_capture(reason: str) -> None:
+    emit_progress(
+        progress_state="failed",
+        progress_message=reason,
+        status="failed",
+        capture_detected=bool(STATE["row_count"]),
+        capture_complete=False,
+        preview_status="none",
+    )
+    print(reason, flush=True)
+    bpy.app.timers.register(_quit_blender_after_capture, first_interval=0.2)
 
 
 def _quit_blender_after_capture():
@@ -363,6 +416,59 @@ def request_quit_after_capture() -> None:
         preview_status="complete" if STATE["row_count"] else "none",
     )
     bpy.app.timers.register(_quit_blender_after_capture, first_interval=0.2)
+
+
+def _start_visible_render():
+    render_mode = get_render_mode()
+    frame_value = get_render_frame()
+    if render_mode == "animation":
+        message = "Starting the scheduled visible Blender animation render."
+    else:
+        message = f"Starting the scheduled visible Blender frame render at frame {frame_value}."
+    emit_progress(
+        progress_state="starting_visible_render",
+        progress_message=message,
+        status="running",
+        capture_detected=False,
+        capture_complete=False,
+        preview_status="none",
+    )
+    print(message, flush=True)
+
+    try:
+        if render_mode == "animation":
+            try:
+                bpy.ops.render.render("INVOKE_DEFAULT", animation=True)
+            except Exception as exc:
+                print(f"Visible animation render invoke path failed: {exc}. Falling back to direct execution.", flush=True)
+                bpy.ops.render.render(animation=True)
+        else:
+            bpy.context.scene.frame_set(frame_value)
+            try:
+                bpy.ops.render.render("INVOKE_DEFAULT", write_still=True)
+            except Exception as exc:
+                print(f"Visible frame render invoke path failed: {exc}. Falling back to direct execution.", flush=True)
+                bpy.ops.render.render(write_still=True)
+    except Exception as exc:
+        _request_quit_without_capture(f"Could not start the visible Blender render: {exc}")
+    return None
+
+
+def schedule_visible_render_if_needed() -> None:
+    if get_ui_mode() != "visible":
+        return
+    if bool(STATE["render_requested"]):
+        return
+    STATE["render_requested"] = True
+    emit_progress(
+        progress_state="visible_render_scheduled",
+        progress_message="Visible Blender session is ready. Scheduling the render after the UI finishes initializing.",
+        status="running",
+        capture_detected=False,
+        capture_complete=False,
+        preview_status="none",
+    )
+    bpy.app.timers.register(_start_visible_render, first_interval=0.5)
 
 
 def process_pid() -> str:
@@ -535,6 +641,9 @@ def register() -> None:
     print(f"csv_output={get_output_path()}", flush=True)
     print(f"status_output={get_status_path()}", flush=True)
     print(f"ui_mode={get_ui_mode()}", flush=True)
+    print(f"render_mode={get_render_mode()}", flush=True)
+    print(f"render_frame={get_render_frame()}", flush=True)
+    schedule_visible_render_if_needed()
 
 
 def unregister() -> None:

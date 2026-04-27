@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import shutil
@@ -12,6 +13,7 @@ from pathlib import Path
 
 import psutil
 
+from automation_components import DEFAULT_AI_TURBO_TITLE_RE
 from workspace_runtime import configure_workspace_runtime
 
 configure_workspace_runtime()
@@ -62,7 +64,16 @@ def load_session_record(runtime_root: Path, session_id: str) -> tuple[Path, dict
     state_path = resolve_session_paths(runtime_root, session_id)["state_path"]
     if not state_path.exists():
         raise FileNotFoundError(f"Session '{session_id}' was not found under {runtime_root}")
-    return state_path, load_json(state_path)
+    deadline = time.monotonic() + 1.0
+    last_error: json.JSONDecodeError | None = None
+    while True:
+        try:
+            return state_path, load_json(state_path)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
 
 
 def save_session_status(state_path: Path, record: dict, **updates) -> None:
@@ -155,16 +166,19 @@ def build_blender_command(args: argparse.Namespace, record: dict) -> list[str]:
         "--python",
         str(listener_script),
     ])
-    if args.render_mode == "animation":
-        command.append("-a")
-    else:
-        command.extend(["-f", str(args.frame)])
+    if blender_ui_mode == "headless":
+        if args.render_mode == "animation":
+            command.append("-a")
+        else:
+            command.extend(["-f", str(args.frame)])
     command.extend([
         "--",
         str(record["output_path"]),
         str(record["session_id"]),
         "",
         blender_ui_mode,
+        str(args.render_mode),
+        str(args.frame),
     ])
     return command
 
@@ -185,50 +199,78 @@ def _import_pywinauto_desktop():
     return Desktop
 
 
-def find_visible_window_for_pid(process_id: int, *, timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS):
+def _collect_visible_windows_for_pid(process_id: int):
     assert process_id > 0, "process_id must be positive."
     Desktop = _import_pywinauto_desktop()
+    candidates = []
+    last_titles: list[str] = []
+    windows = Desktop(backend="uia").windows()
+    for window in windows:
+        try:
+            pid = int(getattr(getattr(window, "element_info", None), "process_id", 0) or 0)
+        except Exception:
+            continue
+        if pid != process_id:
+            continue
+        try:
+            if not window.is_visible():
+                continue
+        except Exception:
+            pass
+        try:
+            title = (window.window_text() or "").strip()
+        except Exception:
+            title = ""
+        if title:
+            last_titles.append(title)
+        try:
+            rect = window.rectangle()
+            area = max(0, rect.width() * rect.height())
+        except Exception:
+            area = 0
+        candidates.append((-area, title.casefold(), window))
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return [window for _, _, window in candidates], last_titles[:10]
+
+
+def find_visible_windows_for_pid(process_id: int, *, timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS):
     deadline = time.monotonic() + timeout
     last_titles: list[str] = []
     while time.monotonic() < deadline:
-        candidates = []
-        windows = Desktop(backend="uia").windows()
-        for window in windows:
-            try:
-                pid = int(getattr(getattr(window, "element_info", None), "process_id", 0) or 0)
-            except Exception:
-                continue
-            if pid != process_id:
-                continue
-            try:
-                if not window.is_visible():
-                    continue
-            except Exception:
-                pass
-            try:
-                title = (window.window_text() or "").strip()
-            except Exception:
-                title = ""
-            if title:
-                last_titles.append(title)
-            try:
-                rect = window.rectangle()
-                area = max(0, rect.width() * rect.height())
-            except Exception:
-                area = 0
-            candidates.append((-area, title.casefold(), window))
-        if candidates:
-            candidates.sort(key=lambda item: (item[0], item[1]))
-            return candidates[0][2]
+        windows, last_titles = _collect_visible_windows_for_pid(process_id)
+        if windows:
+            return windows
         time.sleep(0.25)
     raise UiAutomationError(
-        f"Could not find a visible top-level window for Blender pid={process_id}. Seen titles: {last_titles[:10]}"
+        f"Could not find a visible top-level window for Blender pid={process_id}. Seen titles: {last_titles}"
     )
 
 
-def minimize_visible_blender_window(process_id: int, *, timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS) -> None:
-    window = find_visible_window_for_pid(process_id, timeout=timeout)
-    minimize_window(window)
+def find_visible_window_for_pid(process_id: int, *, timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS):
+    return find_visible_windows_for_pid(process_id, timeout=timeout)[0]
+
+
+def _minimize_visible_windows(windows, *, minimized_handles: set[int] | None = None) -> int:
+    minimized_count = 0
+    for window in windows:
+        handle = getattr(window, "handle", None)
+        if minimized_handles is not None and handle is not None and handle in minimized_handles:
+            continue
+        minimize_window(window)
+        minimized_count += 1
+        if minimized_handles is not None and handle is not None:
+            minimized_handles.add(handle)
+    return minimized_count
+
+
+def minimize_visible_blender_window(
+    process_id: int,
+    *,
+    timeout: float = BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS,
+    minimized_handles: set[int] | None = None,
+) -> int:
+    windows = find_visible_windows_for_pid(process_id, timeout=timeout)
+    return _minimize_visible_windows(windows, minimized_handles=minimized_handles)
 
 
 def terminate_process_tree(process: subprocess.Popen[object], *, wait_seconds: float = BLENDER_VISIBLE_FORCE_EXIT_WAIT_SECONDS) -> int | None:
@@ -272,11 +314,14 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
         progress_updated_at=now_local().isoformat(timespec="milliseconds"),
         current_source_path=args.blend_file,
     )
-    print(f"session_id={record['session_id']}")
-    print(f"software={record['software']}")
-    if record.get("test_name"):
-        print(f"test_name={record['test_name']}")
-    print(f"output_path={record['output_path']}")
+    if "state_path" in record:
+        print_session_summary(record)
+    else:
+        print(f"session_id={record['session_id']}")
+        print(f"software={record['software']}")
+        if record.get("test_name"):
+            print(f"test_name={record['test_name']}")
+        print(f"output_path={record['output_path']}")
     print(f"blender_exe={resolve_blender_executable(args.blender_exe)}")
     print(f"blend_file={resolve_blend_file(args.blend_file)}")
     print(f"blender_ui_mode={blender_ui_mode}")
@@ -284,20 +329,41 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
     process: subprocess.Popen[object] | None = None
     forced_exit_after_capture = False
     returncode: int | None = None
+    minimized_window_handles: set[int] = set()
+    can_auto_minimize_visible_windows = blender_ui_mode == "visible"
     try:
         process = subprocess.Popen(command, cwd=str(Path.cwd()))
         save_session_status(state_path, record, pid=process.pid)
-        if blender_ui_mode == "visible":
+        if can_auto_minimize_visible_windows:
             try:
-                minimize_visible_blender_window(process.pid)
-                print("Minimized the visible Blender window.", flush=True)
+                minimized_count = minimize_visible_blender_window(
+                    process.pid,
+                    minimized_handles=minimized_window_handles,
+                )
+                print(f"Minimized {minimized_count} visible Blender window(s).", flush=True)
             except Exception as exc:
                 print(f"Could not minimize the visible Blender window automatically: {exc}", flush=True)
+                can_auto_minimize_visible_windows = False
         while True:
             returncode = process.poll()
             row_count = count_csv_rows(output_path)
             if returncode is not None:
                 break
+            if can_auto_minimize_visible_windows:
+                try:
+                    visible_windows, _ = _collect_visible_windows_for_pid(process.pid)
+                    minimized_count = _minimize_visible_windows(
+                        visible_windows,
+                        minimized_handles=minimized_window_handles,
+                    )
+                    if minimized_count > 0:
+                        print(
+                            f"Minimized {minimized_count} additional visible Blender window(s).",
+                            flush=True,
+                        )
+                except Exception as exc:
+                    print(f"Could not minimize newly visible Blender windows automatically: {exc}", flush=True)
+                    can_auto_minimize_visible_windows = False
             if blender_ui_mode == "visible" and row_count > 0:
                 print(
                     "Detected completed Blender render output. Waiting briefly for the visible Blender window to exit.",
@@ -355,6 +421,8 @@ def run_blender_session(args: argparse.Namespace, state_path: Path, record: dict
         ),
         progress_updated_at=now_local().isoformat(timespec="milliseconds"),
     )
+    if "state_path" in record:
+        print_session_summary(record)
     print(f"Blender finished. Wrote {row_count} row(s) to {output_path}", flush=True)
     return 0 if successful_completion else 2
 
@@ -1068,7 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
     stop_parser.add_argument("--wait-seconds", type=float, default=15.0, help="How long to wait for finalization.")
     stop_parser.set_defaults(handler=stop_session)
     ui_boost_parser = subparsers.add_parser("ui-boost", help="Enable Performance Boost and check one app in the target Windows UI.")
-    ui_boost_parser.add_argument("--window-title", default="^AI Turbo Engine$", help="Regular expression used to connect to the target top-level window.")
+    ui_boost_parser.add_argument("--window-title", default=DEFAULT_AI_TURBO_TITLE_RE, help="Regular expression used to connect to the target top-level window.")
     ui_boost_parser.add_argument("--app-name", required=True, help="App label shown in the Performance Boost list, for example avidemux.")
     ui_boost_parser.add_argument("--timeout", type=float, default=15.0, help="Seconds to wait for the target window.")
     ui_boost_parser.set_defaults(handler=set_ui_boost)

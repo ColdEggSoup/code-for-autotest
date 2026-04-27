@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from automation_components import DEFAULT_AI_TURBO_TITLE_RE, REPO_ROOT
+from automation_components import DEFAULT_AI_TURBO_TITLE_RE, DEFAULT_PIPELINE_WORKLOAD_NAME, REPO_ROOT
 from full_test_pipeline import DEFAULT_SOFTWARE_ORDER
 
 
@@ -61,7 +61,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     group.addoption(
         "--pipeline-workload-name",
-        default="1080p_video_processing_speed",
+        default=DEFAULT_PIPELINE_WORKLOAD_NAME,
         help="Logical workload label used for pytest-driven pipeline runs.",
     )
     group.addoption(

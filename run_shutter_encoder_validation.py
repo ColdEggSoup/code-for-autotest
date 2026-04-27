@@ -8,7 +8,14 @@ from workspace_runtime import configure_workspace_runtime
 
 configure_workspace_runtime()
 
-from automation_components import MonitorBridge, REPO_ROOT, SoftwareLauncher, default_monitor_output_path, resolve_input_video
+from automation_components import (
+    DEFAULT_PIPELINE_WORKLOAD_NAME,
+    MonitorBridge,
+    REPO_ROOT,
+    SoftwareLauncher,
+    default_monitor_output_path,
+    resolve_input_video,
+)
 from software_operations import run_shutter_encoder_operation
 from ui_automation import UiAutomationError
 
@@ -59,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.input_video:
         input_video_path = Path(args.input_video).resolve(strict=False)
     else:
-        workload_name = "4k_video_processing_speed" if args.workload == "4k" else "1080p_video_processing_speed"
+        workload_name = "4k_small_video_processing_speed" if args.workload == "4k" else DEFAULT_PIPELINE_WORKLOAD_NAME
         input_video_path = resolve_input_video(workload_name)
     logger.info("Validating selected input video path: %s", input_video_path)
     assert input_video_path.exists(), f"Input video does not exist: {input_video_path}"

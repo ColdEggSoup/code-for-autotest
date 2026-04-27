@@ -143,3 +143,23 @@ def test_run_main_decodes_binary_output_without_locale_crash(monkeypatch, tmp_pa
 def test_completed_output_text_tolerates_empty_streams() -> None:
     completed = subprocess.CompletedProcess(args=["python"], returncode=1, stdout="", stderr="")
     assert automation_components._completed_output_text(completed) == ""
+
+
+def test_wait_for_session_completion_treats_stale_as_terminal(monkeypatch, tmp_path) -> None:
+    bridge = automation_components.MonitorBridge(repo_root=tmp_path)
+
+    monkeypatch.setattr(
+        bridge,
+        "_run_main",
+        lambda args, timeout=None: subprocess.CompletedProcess(
+            args=["python", "main.py", *args],
+            returncode=0,
+            stdout="session_id=test-session\nstatus=stale\nerror=Worker process is no longer running.\n",
+            stderr="",
+        ),
+    )
+
+    payload = bridge.wait_for_session_completion("test-session", timeout_seconds=5.0, poll_interval_seconds=0.01)
+
+    assert payload["status"] == "stale"
+    assert payload["session_id"] == "test-session"

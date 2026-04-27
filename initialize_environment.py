@@ -21,14 +21,16 @@ from workspace_runtime import configure_workspace_runtime
 
 configure_workspace_runtime()
 
-from automation_components import REPO_ROOT, WHITELIST_APP_DIR
 from ui_automation import UiAutomationError, bring_window_to_front, find_labeled_edit, set_edit_text_value
 
 
 logger = logging.getLogger(__name__)
 
+INITIALIZER_BUILD = "2026-04-24-blender-msi-quoted-install-root-3"
+REPO_ROOT = Path(__file__).resolve().parent
+WHITELIST_APP_DIR = REPO_ROOT / "whitelist app"
 INSTALLER_DIR = WHITELIST_APP_DIR / "app"
-PYTHON_PACKAGE_NAMES = ("psutil", "openpyxl", "pywinauto", "pyautogui")
+PYTHON_PACKAGE_NAMES = ("psutil", "openpyxl", "pywinauto", "pyautogui", "pytest")
 ACCEPTABLE_INSTALL_EXIT_CODES = {0, 1641, 3010}
 COMMON_INSTALL_TIMEOUT_SECONDS = 900.0
 INSTALLER_WINDOW_POST_EXIT_GRACE_SECONDS = 20.0
@@ -115,6 +117,25 @@ INSTALLER_MODAL_TITLE_PATTERNS = (
     r"^\u786e\u8ba4$",
     r"^\u63d0\u793a$",
     r"^\u95ee\u9898$",
+)
+GENERIC_INSTALLER_TITLE_TOKENS = frozenset(
+    {
+        "app",
+        "application",
+        "bits",
+        "exe",
+        "gui",
+        "install",
+        "installer",
+        "msi",
+        "setup",
+        "update",
+        "windows",
+        "win32",
+        "win64",
+        "x64",
+        "x86",
+    }
 )
 INSTALLER_COMPLETION_TEXT_PATTERNS = (
     r".*\bcompleted\b.*",
@@ -479,7 +500,7 @@ SOFTWARE_INSTALL_PROFILES = (
             *_program_files_candidates("Blender Foundation", "Blender", "blender.exe"),
         ),
         silent_argument_sets=((),),
-        msi_directory_properties=("INSTALLDIR", "INSTALLFOLDER", "TARGETDIR"),
+        msi_directory_properties=("INSTALL_ROOT",),
     ),
 )
 
@@ -646,6 +667,37 @@ def powershell_quote(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _looks_like_msi_property(argument: str) -> bool:
+    if "=" not in argument:
+        return False
+    name, value = argument.split("=", 1)
+    if not name or not value:
+        return False
+    return re.fullmatch(r"[A-Z0-9_]+", name) is not None
+
+
+def _msi_argument_fragment(argument: str) -> str:
+    if not _looks_like_msi_property(argument):
+        return subprocess.list2cmdline([argument])
+    name, value = argument.split("=", 1)
+    quoted_value = subprocess.list2cmdline([value])
+    return f"{name}={quoted_value}"
+
+
+def _windows_command_line(command: Sequence[str]) -> str:
+    executable, *arguments = command
+    if Path(executable).name.casefold() == "msiexec.exe":
+        parts = [subprocess.list2cmdline([executable]), *(_msi_argument_fragment(argument) for argument in arguments)]
+        return " ".join(parts)
+    return subprocess.list2cmdline(list(command))
+
+
+def _windows_argument_string(executable: str, arguments: Sequence[str]) -> str:
+    if Path(executable).name.casefold() == "msiexec.exe":
+        return " ".join(_msi_argument_fragment(argument) for argument in arguments)
+    return " ".join(subprocess.list2cmdline([argument]) for argument in arguments)
+
+
 def _silent_directory_arguments(profile: SoftwareInstallProfile) -> tuple[str, ...]:
     if profile.silent_directory_mode is None:
         return ()
@@ -666,11 +718,11 @@ def _msi_directory_arguments(profile: SoftwareInstallProfile) -> tuple[str, ...]
 
 def _shell_start_process(command: Sequence[str], *, cwd: Path) -> ShellStartedProcess:
     executable, *arguments = command
-    argument_list = ", ".join(f"'{powershell_quote(argument)}'" for argument in arguments)
+    argument_string = _windows_argument_string(executable, arguments)
     script = (
-        f"$arguments = @({argument_list}); "
         f"$process = Start-Process -FilePath '{powershell_quote(executable)}' "
-        f"-ArgumentList $arguments -WorkingDirectory '{powershell_quote(str(cwd))}' -PassThru; "
+        f"-ArgumentList '{powershell_quote(argument_string)}' "
+        f"-WorkingDirectory '{powershell_quote(str(cwd))}' -PassThru; "
         "Write-Output $process.Id"
     )
     completed = subprocess.run(
@@ -693,8 +745,11 @@ def _shell_start_process(command: Sequence[str], *, cwd: Path) -> ShellStartedPr
 
 def launch_installer_process(command: Sequence[str], *, cwd: Path):
     try:
+        command_to_run: Sequence[str] | str = command
+        if Path(command[0]).name.casefold() == "msiexec.exe":
+            command_to_run = _windows_command_line(command)
         return subprocess.Popen(
-            command,
+            command_to_run,
             cwd=str(cwd),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -809,7 +864,7 @@ def _installer_title_tokens(profile: SoftwareInstallProfile) -> tuple[str, ...]:
         if normalized:
             tokens.add(normalized)
     for token in re.split(r"[^a-z0-9]+", profile.installer_path.stem.casefold()):
-        if len(token) >= 4 and not token.isdigit():
+        if len(token) >= 4 and not token.isdigit() and token not in GENERIC_INSTALLER_TITLE_TOKENS:
             tokens.add(token)
     return tuple(sorted(tokens))
 
@@ -855,6 +910,21 @@ def _list_candidate_installer_windows(
         )
     candidates.sort()
     return [item[-1] for item in candidates]
+
+
+def _window_text_snippet(window, *, limit: int = 6) -> str:
+    snippets: list[str] = []
+    for wrapper in _iter_controls(window):
+        text = _safe_window_text(wrapper)
+        if not text:
+            continue
+        compact = re.sub(r"\s+", " ", text).strip()
+        if not compact or compact in snippets:
+            continue
+        snippets.append(compact)
+        if len(snippets) >= limit:
+            break
+    return " | ".join(snippets)
 
 
 def _find_matching_controls(root, patterns: Sequence[str], *, control_types: Sequence[str]) -> list:
@@ -1194,7 +1264,11 @@ def _window_has_completion_text(window) -> bool:
 
 def _advance_installer_window(window, profile: SoftwareInstallProfile) -> bool:
     title = _safe_window_text(window) or "<untitled>"
-    logger.info("Processing installer window: %s", title)
+    logger.info(
+        "Processing installer window: %s | details: %s",
+        title,
+        _window_text_snippet(window),
+    )
     try:
         bring_window_to_front(window, keep_topmost=False)
     except Exception:
@@ -1294,10 +1368,29 @@ def installer_commands(profile: SoftwareInstallProfile) -> list[list[str]]:
     installer = str(profile.installer_path)
     if profile.installer_path.suffix.lower() == ".msi":
         msi_dir_args = list(_msi_directory_arguments(profile))
-        return [
-            ["msiexec.exe", "/i", installer, *msi_dir_args],
-            ["msiexec.exe", "/i", installer, "/qn", "/norestart", *msi_dir_args],
-        ]
+        commands: list[list[str]] = []
+        if msi_dir_args:
+            commands.extend(
+                [
+                    ["msiexec.exe", "/i", installer, "/qn", "/norestart", *msi_dir_args],
+                    ["msiexec.exe", "/i", installer, *msi_dir_args],
+                ]
+            )
+        commands.extend(
+            [
+                ["msiexec.exe", "/i", installer, "/qn", "/norestart"],
+                ["msiexec.exe", "/i", installer],
+            ]
+        )
+        unique_commands: list[list[str]] = []
+        seen: set[tuple[str, ...]] = set()
+        for command in commands:
+            key = tuple(command)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_commands.append(command)
+        return unique_commands
     silent_dir_args = _silent_directory_arguments(profile)
     silent_commands = []
     for argument_set in profile.silent_argument_sets:
@@ -1479,6 +1572,7 @@ def main(argv: list[str] | None = None) -> int:
     recorder = InitializationRecorder(run_paths)
     selected = set(args.software)
 
+    logger.info("initialize_environment build=%s", INITIALIZER_BUILD)
     logger.info("Starting environment initialization.")
     recorder.record(
         "initialization",

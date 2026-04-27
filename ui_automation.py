@@ -264,10 +264,29 @@ def find_text_control(root, patterns: str | Sequence[str], *, control_types: Seq
     return candidates[0][2]
 
 
+def _inactive_desktop_error(exc: Exception) -> bool:
+    return "There is no active desktop required for moving mouse cursor!" in str(exc)
+
+
+def click_control(control, *, post_click_sleep: float = 0.4) -> None:
+    try:
+        control.click_input()
+        time.sleep(post_click_sleep)
+        return
+    except Exception as exc:
+        if _inactive_desktop_error(exc):
+            raise UiAutomationError(
+                f"Could not activate control '{_safe_window_text(control) or '<untitled>'}' with click_input() "
+                "because there is no interactive desktop."
+            ) from exc
+        raise UiAutomationError(
+            f"Could not activate control '{_safe_window_text(control) or '<untitled>'}' with click_input()."
+        ) from exc
+
+
 def click_text_control(root, patterns: str | Sequence[str], *, control_types: Sequence[str] = ()) -> None:
     control = find_text_control(root, patterns, control_types=control_types)
-    control.click_input()
-    time.sleep(0.4)
+    click_control(control)
 
 
 def control_exists(root, patterns: str | Sequence[str], *, control_types: Sequence[str] = ()) -> bool:
@@ -465,6 +484,49 @@ def find_labeled_edit(root, label_patterns: Sequence[str]):
     return _find_labeled_edit(root, label_patterns)
 
 
+def _find_file_dialog_edit(dialog, confirm_patterns: Sequence[str]):
+    try:
+        return _find_labeled_edit(dialog, FILE_NAME_LABEL_PATTERNS)
+    except UiAutomationError:
+        pass
+
+    confirm_rect = None
+    try:
+        confirm_button = _find_last_matching_control(dialog, confirm_patterns, control_types=("Button",))
+        confirm_rect = _wrapper_rect(confirm_button)
+    except Exception:
+        confirm_rect = None
+
+    candidates = []
+    for wrapper in _iter_controls(dialog):
+        control_type = _control_type(wrapper).lower()
+        if control_type not in {"edit", "combobox"}:
+            continue
+        rect = _wrapper_rect(wrapper)
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        if width < 60 or height < 14:
+            continue
+        if confirm_rect is not None:
+            center_y_distance = abs(((rect.top + rect.bottom) // 2) - ((confirm_rect.top + confirm_rect.bottom) // 2))
+            score = (
+                0 if rect.left < confirm_rect.left else 1,
+                0 if rect.bottom >= confirm_rect.top - 120 else 1,
+                center_y_distance,
+                -width,
+                -rect.top,
+                rect.left,
+            )
+        else:
+            score = (0, 0, 0, -width, -rect.top, rect.left)
+        candidates.append((score, wrapper))
+
+    if not candidates:
+        return _find_first_control(dialog, ("Edit", "ComboBox"))
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
+
+
 def _dialog_contains_file(dialog, file_path: Path) -> bool:
     candidates = {file_path.name.casefold(), file_path.stem.casefold()}
     for wrapper in _iter_controls(dialog):
@@ -502,8 +564,7 @@ def _try_select_file_from_dialog(dialog, file_path: Path, confirm_patterns: Sequ
 
     logger.info("Selecting visible file item from dialog list: %s", file_path.name)
     bring_window_to_front(dialog, keep_topmost=False)
-    file_item.click_input()
-    time.sleep(0.2)
+    click_control(file_item, post_click_sleep=0.2)
     dialog_handle = _get_window_handle(dialog)
 
     confirm_button = _find_last_matching_control(dialog, confirm_patterns, control_types=("Button",))
@@ -515,14 +576,14 @@ def _try_select_file_from_dialog(dialog, file_path: Path, confirm_patterns: Sequ
                     "Clicking file dialog confirmation button after file selection: %s",
                     _safe_window_text(confirm_button) or "<untitled>",
                 )
-                confirm_button.click_input()
+                click_control(confirm_button)
                 if _wait_for_window_to_close(dialog_handle, timeout=0.8):
                     return True
                 logger.info("File dialog stayed open after clicking the selected-file confirmation button.")
                 break
         except Exception:
             logger.info("Confirmation button state could not be read reliably. Clicking it directly.")
-            confirm_button.click_input()
+            click_control(confirm_button)
             if _wait_for_window_to_close(dialog_handle, timeout=0.8):
                 return True
             logger.info("File dialog stayed open after directly clicking the confirmation button.")
@@ -541,7 +602,7 @@ def _try_select_file_from_dialog(dialog, file_path: Path, confirm_patterns: Sequ
     logger.info("Trying Enter on the selected file item.")
     try:
         bring_window_to_front(dialog, keep_topmost=False)
-        file_item.click_input()
+        click_control(file_item, post_click_sleep=0.0)
     except Exception:
         bring_window_to_front(dialog, keep_topmost=False)
     send_hotkey("{ENTER}")
@@ -807,7 +868,10 @@ def _set_edit_value_with_clipboard(edit_wrapper, value: str) -> None:
         click_y = max(1, height // 2)
         target.click_input(coords=(click_x, click_y))
     except Exception:
-        target.click_input()
+        try:
+            target.click_input()
+        except Exception:
+            pass
     send_hotkey("^a")
     send_hotkey("{BACKSPACE}")
     _set_clipboard_text(value)
@@ -995,8 +1059,7 @@ def accept_overwrite_confirmation(timeout: float = 2.0, *, owner_window=None, po
             bring_window_to_front(dialog, keep_topmost=False)
             confirm_button = find_text_control(dialog, OVERWRITE_CONFIRM_PATTERNS, control_types=("Button",))
             logger.info("Clicking overwrite confirmation button: %s", _safe_window_text(confirm_button) or "<untitled>")
-            confirm_button.click_input()
-            time.sleep(0.4)
+            click_control(confirm_button)
             return True
         except Exception:
             pass
@@ -1043,6 +1106,7 @@ def fill_file_dialog(
     confirm_patterns: Sequence[str] = DEFAULT_CONFIRM_PATTERNS,
     timeout: float = 15.0,
     must_exist: bool = True,
+    allow_direct_selection: bool = True,
 ) -> None:
     normalized_path = Path(file_path).resolve(strict=False)
     logger.info(
@@ -1063,16 +1127,18 @@ def fill_file_dialog(
     bring_window_to_front(dialog, keep_topmost=False)
     logger.info("Filling dialog window: %s", _safe_window_text(dialog) or "<untitled>")
 
-    if must_exist and _dialog_contains_file(dialog, normalized_path):
+    if allow_direct_selection and must_exist and _dialog_contains_file(dialog, normalized_path):
         logger.info("Target file is already visible in the current dialog list: %s", normalized_path.name)
         if _try_select_file_from_dialog(dialog, normalized_path, confirm_patterns):
             return
         logger.info("Direct file selection did not succeed. Falling back to edit input.")
 
-    try:
-        edit = _find_labeled_edit(dialog, FILE_NAME_LABEL_PATTERNS)
-    except UiAutomationError:
-        edit = _find_first_control(dialog, ("Edit", "ComboBox"))
+    edit = _find_file_dialog_edit(dialog, confirm_patterns)
+    logger.info(
+        "Resolved file dialog input control. control_type=%s title=%s",
+        _control_type(edit) or "<unknown>",
+        _safe_window_text(edit) or "<untitled>",
+    )
     input_value = str(normalized_path)
     if must_exist and _dialog_contains_file(dialog, normalized_path):
         input_value = normalized_path.name
@@ -1088,7 +1154,7 @@ def fill_file_dialog(
     dialog_handle = _get_window_handle(dialog)
     confirm_button = _find_last_matching_control(dialog, confirm_patterns, control_types=("Button",))
     logger.info("Clicking file dialog confirmation button: %s", _safe_window_text(confirm_button) or "<untitled>")
-    confirm_button.click_input()
+    click_control(confirm_button)
     if not _wait_for_window_to_close(dialog_handle, timeout=0.8):
         logger.info("File dialog stayed open after clicking the confirmation button. Retrying with Enter.")
         try:
@@ -1100,7 +1166,10 @@ def fill_file_dialog(
                 click_y = max(1, max(1, (rect.bottom - rect.top)) // 2)
                 target.click_input(coords=(click_x, click_y))
             except Exception:
-                target.click_input()
+                try:
+                    target.click_input()
+                except Exception:
+                    pass
         except Exception:
             bring_window_to_front(dialog, keep_topmost=False)
         send_hotkey("{ENTER}")
@@ -1258,7 +1327,13 @@ class WindowTopmostKeeper:
             self._stop_event.wait(self.interval_seconds)
 
 
-def set_performance_boost_selection(window_title_re: str, app_name: str, timeout: float = 15.0) -> list[UiActionResult]:
+def set_performance_boost_state(
+    window_title_re: str,
+    app_name: str,
+    *,
+    enabled: bool,
+    timeout: float = 15.0,
+) -> list[UiActionResult]:
     Application, _, _ = _import_pywinauto()
     app = Application(backend="uia").connect(title_re=window_title_re, timeout=timeout)
     window = app.window(title_re=window_title_re)
@@ -1267,16 +1342,33 @@ def set_performance_boost_selection(window_title_re: str, app_name: str, timeout
 
     boost_label = _find_title_element(window, r"Performance Boost")
     boost_toggle = _find_row_toggle(window, boost_label)
-    boost_changed = _set_toggle_state(boost_toggle, expected_checked=True)
-
     app_label = _find_title_element(window, re.escape(app_name))
     app_checkbox = _find_row_toggle(window, app_label)
-    app_changed = _set_toggle_state(app_checkbox, expected_checked=True)
+
+    if enabled:
+        boost_changed = _set_toggle_state(boost_toggle, expected_checked=True)
+        app_changed = _set_toggle_state(app_checkbox, expected_checked=True)
+        boost_state = "checked"
+        app_state = "checked"
+    else:
+        app_changed = _set_toggle_state(app_checkbox, expected_checked=False)
+        boost_changed = _set_toggle_state(boost_toggle, expected_checked=False)
+        boost_state = "unchecked"
+        app_state = "unchecked"
 
     return [
-        UiActionResult(target="performance_boost", changed=boost_changed, state="checked"),
-        UiActionResult(target=app_name, changed=app_changed, state="checked"),
+        UiActionResult(target="performance_boost", changed=boost_changed, state=boost_state),
+        UiActionResult(target=app_name, changed=app_changed, state=app_state),
     ]
+
+
+def set_performance_boost_selection(window_title_re: str, app_name: str, timeout: float = 15.0) -> list[UiActionResult]:
+    return set_performance_boost_state(
+        window_title_re,
+        app_name,
+        enabled=True,
+        timeout=timeout,
+    )
 
 
 

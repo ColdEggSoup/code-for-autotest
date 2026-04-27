@@ -16,16 +16,20 @@ from monitoring_common import FINAL_SESSION_STATUSES
 from ui_automation import (
     UiAutomationError,
     WindowTopmostKeeper,
+    clear_window_topmost,
     connect_window,
-    set_performance_boost_selection,
+    request_window_close,
+    set_performance_boost_state,
 )
 
 
 REPO_ROOT = Path(__file__).resolve().parent
 WHITELIST_APP_DIR = REPO_ROOT / "whitelist app"
 TEST_DATA_DIR = REPO_ROOT / "test_data"
-DEFAULT_AI_TURBO_TITLE_RE = r"^AI Turbo Engine$"
+DEFAULT_AI_TURBO_TITLE_RE = r"^Lenovo AI Turbo Engine$"
+DEFAULT_PIPELINE_WORKLOAD_NAME = "4k_big_video_processing_speed"
 logger = logging.getLogger(__name__)
+TERMINAL_SESSION_STATUSES = FINAL_SESSION_STATUSES | {"stale"}
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,11 @@ class MonitorLaunchResult:
     session_id: str
     output_path: Path
     raw_output: str
+    state_path: Path | None = None
+    session_output_path: Path | None = None
+    worker_stdout_path: Path | None = None
+    worker_stderr_path: Path | None = None
+    status: str = ""
 
 
 SOFTWARE_SPECS = {
@@ -244,10 +253,14 @@ def _completed_output_text(completed: subprocess.CompletedProcess[str]) -> str:
 def resolve_input_video(workload_name: str) -> Path:
     normalized = workload_name.strip().lower()
     assert normalized, "workload_name must not be empty."
-    if "4k" in normalized:
-        path = TEST_DATA_DIR / "4K.mp4"
+    if "small" in normalized:
+        path = TEST_DATA_DIR / "4K_small.mp4"
+    elif "big" in normalized or "1080" in normalized:
+        path = TEST_DATA_DIR / "4K_big.mp4"
+    elif "4k" in normalized:
+        path = TEST_DATA_DIR / "4K_small.mp4"
     else:
-        path = TEST_DATA_DIR / "1080.mp4"
+        path = TEST_DATA_DIR / "4K_big.mp4"
     assert path.exists(), f"Input video not found: {path}"
     return path
 
@@ -334,7 +347,18 @@ class MonitorBridge:
         return MonitorLaunchResult(
             software=software,
             session_id=payload["session_id"],
-            output_path=Path(resolved_output),
+            output_path=Path(resolved_output).resolve(strict=False),
+            state_path=Path(payload["state_path"]).resolve(strict=False) if payload.get("state_path") else None,
+            session_output_path=Path(payload["session_output_path"]).resolve(strict=False)
+            if payload.get("session_output_path")
+            else None,
+            worker_stdout_path=Path(payload["worker_stdout_path"]).resolve(strict=False)
+            if payload.get("worker_stdout_path")
+            else None,
+            worker_stderr_path=Path(payload["worker_stderr_path"]).resolve(strict=False)
+            if payload.get("worker_stderr_path")
+            else None,
+            status=str(payload.get("status", "") or ""),
             raw_output=completed.stdout,
         )
 
@@ -353,7 +377,7 @@ class MonitorBridge:
             assert completed.returncode == 0, _completed_output_text(completed)
             last_payload = parse_key_value_output(completed.stdout)
             status = last_payload.get("status", "")
-            if status in FINAL_SESSION_STATUSES:
+            if status in TERMINAL_SESSION_STATUSES:
                 return last_payload
             time.sleep(poll_interval_seconds)
         raise AssertionError(f"Session '{session_id}' did not reach a final state. Last payload: {last_payload}")
@@ -383,7 +407,7 @@ class MonitorBridge:
         blender_ui_mode: str = "visible",
         render_mode: str = "frame",
         frame: int = 1,
-    ) -> Path:
+    ) -> MonitorLaunchResult:
         assert blend_file.exists(), f"Blend file does not exist: {blend_file}"
         assert output_path.parent.exists(), f"Output directory does not exist: {output_path.parent}"
         assert blender_ui_mode in {"visible", "headless"}, f"Unsupported Blender UI mode: {blender_ui_mode}"
@@ -412,10 +436,26 @@ class MonitorBridge:
             args,
             timeout=7200.0,
         )
-        assert completed.returncode == 0, _completed_output_text(completed)
         payload = parse_key_value_output(completed.stdout)
-        resolved_output = payload.get("output_path") or str(output_path)
-        return Path(resolved_output)
+        assert completed.returncode == 0, _completed_output_text(completed)
+        resolved_output = payload.get("aggregate_output_path") or payload.get("output_path") or str(output_path)
+        return MonitorLaunchResult(
+            software="blender",
+            session_id=str(payload.get("session_id", "") or ""),
+            output_path=Path(resolved_output).resolve(strict=False),
+            state_path=Path(payload["state_path"]).resolve(strict=False) if payload.get("state_path") else None,
+            session_output_path=Path(payload["session_output_path"]).resolve(strict=False)
+            if payload.get("session_output_path")
+            else None,
+            worker_stdout_path=Path(payload["worker_stdout_path"]).resolve(strict=False)
+            if payload.get("worker_stdout_path")
+            else None,
+            worker_stderr_path=Path(payload["worker_stderr_path"]).resolve(strict=False)
+            if payload.get("worker_stderr_path")
+            else None,
+            status=str(payload.get("status", "") or ""),
+            raw_output=completed.stdout,
+        )
 
 
 class AiTurboEngineController:
@@ -432,6 +472,11 @@ class AiTurboEngineController:
         self._keeper: WindowTopmostKeeper | None = None
 
     def ensure_running(self) -> None:
+        try:
+            connect_window(self.window_title_re, timeout=1.0)
+            return
+        except UiAutomationError:
+            pass
         if self.shortcut_path is not None and self.shortcut_path.exists():
             os.startfile(str(self.shortcut_path))
             time.sleep(3.0)
@@ -443,10 +488,22 @@ class AiTurboEngineController:
             ) from exc
 
     def configure_for_software(self, software: str) -> None:
+        self.set_software_boost_enabled(software, enabled=True)
+
+    def set_software_boost_enabled(self, software: str, enabled: bool) -> None:
         spec = SOFTWARE_SPECS[software]
         self.ensure_running()
-        results = set_performance_boost_selection(self.window_title_re, spec.ai_turbo_app_name, timeout=15.0)
-        assert results, f"Failed to configure AI Turbo Engine for {software}"
+        results = set_performance_boost_state(
+            self.window_title_re,
+            spec.ai_turbo_app_name,
+            enabled=enabled,
+            timeout=15.0,
+        )
+        action = "configure" if enabled else "disable"
+        assert results, f"Failed to {action} AI Turbo Engine for {software}"
+
+    def disable_for_software(self, software: str) -> None:
+        self.set_software_boost_enabled(software, enabled=False)
 
     def start_topmost_guard(self) -> None:
         self.ensure_running()
@@ -463,3 +520,38 @@ class AiTurboEngineController:
             return
         self._keeper.stop()
         self._keeper = None
+
+    def close(self, *, wait_seconds: float = 10.0) -> None:
+        self.stop_topmost_guard()
+        try:
+            window = connect_window(self.window_title_re, timeout=1.0)
+        except UiAutomationError:
+            return
+        clear_window_topmost(window)
+        requested = request_window_close(window)
+        if not requested:
+            return
+        deadline = time.monotonic() + wait_seconds
+        while time.monotonic() < deadline:
+            try:
+                connect_window(self.window_title_re, timeout=0.5)
+            except UiAutomationError:
+                return
+            time.sleep(0.25)
+        raise AssertionError(f"AI Turbo Engine did not close within {wait_seconds:.1f} seconds.")
+
+    def run_sequence(self, software: str, *, wait_seconds: float) -> None:
+        assert wait_seconds >= 0, "wait_seconds must be non-negative."
+        logger.info(
+            "Running standalone AI Turbo Engine sequence. software=%s wait_seconds=%.1f",
+            software,
+            wait_seconds,
+        )
+        self.start_topmost_guard()
+        try:
+            self.set_software_boost_enabled(software, enabled=True)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+            self.set_software_boost_enabled(software, enabled=False)
+        finally:
+            self.close()
