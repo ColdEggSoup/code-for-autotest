@@ -373,6 +373,45 @@ def test_avidemux_wait_for_export_completion_accepts_done_dialog(monkeypatch, tm
     operator._wait_for_export_completion(output_video_path)
 
 
+def test_avidemux_handle_export_overwrite_prompt_accepts_top_level_dialog(monkeypatch, tmp_path: Path) -> None:
+    operator = software_operations.AvidemuxOperator(software_operations.OPERATION_PROFILES["avidemux"])
+    input_video_path = tmp_path / "input.mp4"
+    input_video_path.write_bytes(b"video")
+    output_video_path = tmp_path / "out.mp4"
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        software_operations,
+        "accept_overwrite_confirmation",
+        lambda timeout=0.8, owner_window=None, poll_interval=0.05: calls.append("generic") or True,
+    )
+    monkeypatch.setattr(
+        operator,
+        "_handle_embedded_overwrite_prompt",
+        lambda *args, **kwargs: calls.append("embedded"),
+    )
+
+    operator._handle_export_overwrite_prompt(_DummyWindow("Avidemux"), input_video_path, output_video_path)
+
+    assert calls == ["generic"]
+
+
+def test_avidemux_handle_embedded_overwrite_prompt_clicks_overwrite_button(monkeypatch, tmp_path: Path) -> None:
+    operator = software_operations.AvidemuxOperator(software_operations.OPERATION_PROFILES["avidemux"])
+    input_video_path = tmp_path / "input.mp4"
+    input_video_path.write_bytes(b"video")
+    output_video_path = tmp_path / "out.mp4"
+    overwrite_button = _DummyButton("Overwrite(O)")
+
+    monkeypatch.setattr(operator, "_embedded_overwrite_prompt_text", lambda window: f"Overwrite file {output_video_path.name}?")
+    monkeypatch.setattr(operator, "_find_bottom_button", lambda window, patterns: overwrite_button)
+    monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
+
+    operator._handle_embedded_overwrite_prompt(_DummyWindow("Avidemux"), input_video_path, output_video_path, timeout=0.2)
+
+    assert overwrite_button.clicked is True
+
+
 def test_avidemux_minimize_encode_dialog_to_tray_clicks_tray_button(monkeypatch) -> None:
     operator = software_operations.AvidemuxOperator(software_operations.OPERATION_PROFILES["avidemux"])
     window = _DummyWindow("Avidemux", process_id=4321)

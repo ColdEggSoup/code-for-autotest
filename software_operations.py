@@ -124,12 +124,26 @@ AVIDEMUX_OPEN_CONFIRM_MIN_GAP = 12
 AVIDEMUX_VIDEO_CODEC_TEXT = "Mpeg4 AVC (x264)"
 AVIDEMUX_MP4_MUXER_TEXT = "MP4 Muxer"
 AVIDEMUX_YES_PATTERNS = (r"^Yes$", r"^\u662f$")
+AVIDEMUX_OVERWRITE_CONFIRM_PATTERNS = (
+    r"^Yes(?:\([A-Z]\))?$",
+    r"^Overwrite(?:\([A-Z]\))?$",
+    r"^Replace(?:\([A-Z]\))?$",
+    r"^\u662f(?:\([A-Z]\))?$",
+    r"^\u8986\u5199(?:\([A-Z]\))?$",
+    r"^\u8986\u76d6(?:\([A-Z]\))?$",
+    r"^\u590d\u5199(?:\([A-Z]\))?$",
+)
 AVIDEMUX_NO_PATTERNS = (r"^No$", r"^\u5426$")
 AVIDEMUX_CANCEL_PATTERNS = (r"^Cancel$", r"^\u53d6\u6d88$")
 AVIDEMUX_SAVE_BUTTON_PATTERNS = (r"^Save(?:\([A-Z]\))?$", r"^\u4fdd\u5b58(?:\([A-Z]\))?$")
 AVIDEMUX_OVERWRITE_PROMPT_PATTERNS = (
     r"^Overwrite file .*\?$",
     r"^\u8986\u5199\u6587\u4ef6 .*\?$",
+    r"^.*overwrite.*$",
+    r"^.*replace.*$",
+    r"^.*\u8986\u5199.*$",
+    r"^.*\u8986\u76d6.*$",
+    r"^.*\u590d\u5199.*$",
 )
 AVIDEMUX_PROGRESS_DIALOG_TITLE_PATTERNS = (
     r"^Encoding.*$",
@@ -1566,7 +1580,7 @@ class AvidemuxOperator(SoftwareOperator):
         save_button.click_input()
         time.sleep(0.5)
 
-        self._handle_embedded_overwrite_prompt(window, input_video_path, output_video_path)
+        self._handle_export_overwrite_prompt(window, input_video_path, output_video_path)
 
         deadline = time.monotonic() + AVIDEMUX_SAVE_START_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
@@ -1583,6 +1597,26 @@ class AvidemuxOperator(SoftwareOperator):
                 return title
         return ""
 
+    def _handle_export_overwrite_prompt(
+        self,
+        window,
+        input_video_path: Path,
+        output_video_path: Path,
+        *,
+        timeout: float = 3.0,
+    ) -> None:
+        logger.info("Checking for Avidemux overwrite confirmation after clicking Save.")
+        overwrite_accepted = accept_overwrite_confirmation(timeout=0.8, owner_window=window, poll_interval=0.05)
+        if overwrite_accepted:
+            logger.info("Accepted top-level Avidemux overwrite confirmation for '%s'.", output_video_path.name)
+            return
+        self._handle_embedded_overwrite_prompt(
+            window,
+            input_video_path,
+            output_video_path,
+            timeout=max(timeout - 0.8, 0.5),
+        )
+
     def _handle_embedded_overwrite_prompt(
         self,
         window,
@@ -1596,10 +1630,13 @@ class AvidemuxOperator(SoftwareOperator):
             prompt_text = self._embedded_overwrite_prompt_text(window)
             if not prompt_text:
                 try:
-                    accept_overwrite_confirmation(timeout=0.2, owner_window=window, poll_interval=0.05)
+                    if accept_overwrite_confirmation(timeout=0.2, owner_window=window, poll_interval=0.05):
+                        logger.info("Accepted delayed top-level Avidemux overwrite confirmation for '%s'.", output_video_path.name)
+                        return
                 except Exception:
                     pass
-                return
+                time.sleep(0.1)
+                continue
 
             logger.info("Detected embedded Avidemux overwrite prompt: %s", prompt_text)
             expected_name = output_video_path.name.casefold()
@@ -1614,9 +1651,13 @@ class AvidemuxOperator(SoftwareOperator):
                     f"Avidemux attempted to overwrite the input clip instead of '{output_video_path.name}': {prompt_text}"
                 )
 
-            yes_button = self._find_bottom_button(window, AVIDEMUX_YES_PATTERNS)
-            logger.info("Accepting the Avidemux overwrite prompt for '%s'.", output_video_path.name)
-            yes_button.click_input()
+            confirm_button = self._find_bottom_button(window, AVIDEMUX_OVERWRITE_CONFIRM_PATTERNS)
+            logger.info(
+                "Accepting the Avidemux overwrite prompt for '%s' with button: %s",
+                output_video_path.name,
+                self._wrapper_text(confirm_button) or "<untitled>",
+            )
+            confirm_button.click_input()
             time.sleep(0.5)
             return
         logger.info("No embedded Avidemux overwrite prompt appeared.")
