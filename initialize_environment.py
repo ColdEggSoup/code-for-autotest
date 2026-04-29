@@ -26,7 +26,7 @@ from ui_automation import UiAutomationError, bring_window_to_front, find_labeled
 
 logger = logging.getLogger(__name__)
 
-INITIALIZER_BUILD = "2026-04-24-blender-msi-quoted-install-root-3"
+INITIALIZER_BUILD = "2026-04-29-elevated-installer-guard-1"
 REPO_ROOT = Path(__file__).resolve().parent
 WHITELIST_APP_DIR = REPO_ROOT / "whitelist app"
 INSTALLER_DIR = WHITELIST_APP_DIR / "app"
@@ -36,6 +36,7 @@ COMMON_INSTALL_TIMEOUT_SECONDS = 900.0
 INSTALLER_WINDOW_POST_EXIT_GRACE_SECONDS = 20.0
 INSTALLER_POLL_SECONDS = 1.0
 INSTALLER_ACTION_SETTLE_SECONDS = 1.0
+ELEVATED_INSTALLER_DIAGNOSTIC_TIMEOUT_SECONDS = 90.0
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 SYNCHRONIZE = 0x00100000
 STILL_ACTIVE = 259
@@ -305,8 +306,9 @@ class InitializationRecorder:
 
 
 class ShellStartedProcess:
-    def __init__(self, pid: int | None):
+    def __init__(self, pid: int | None, *, requires_elevation: bool = False):
         self.pid = pid
+        self.requires_elevation = requires_elevation
         self._returncode: int | None = None
         self._handle = None
         if pid is not None:
@@ -667,6 +669,13 @@ def powershell_quote(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _current_process_is_elevated() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def _looks_like_msi_property(argument: str) -> bool:
     if "=" not in argument:
         return False
@@ -716,7 +725,12 @@ def _msi_directory_arguments(profile: SoftwareInstallProfile) -> tuple[str, ...]
     return tuple(f"{property_name}={install_root}" for property_name in profile.msi_directory_properties)
 
 
-def _shell_start_process(command: Sequence[str], *, cwd: Path) -> ShellStartedProcess:
+def _shell_start_process(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    requires_elevation: bool = False,
+) -> ShellStartedProcess:
     executable, *arguments = command
     argument_string = _windows_argument_string(executable, arguments)
     script = (
@@ -739,8 +753,8 @@ def _shell_start_process(command: Sequence[str], *, cwd: Path) -> ShellStartedPr
             "Falling back to title-based window detection only.",
             command,
         )
-        return ShellStartedProcess(None)
-    return ShellStartedProcess(int(lines[-1]))
+        return ShellStartedProcess(None, requires_elevation=requires_elevation)
+    return ShellStartedProcess(int(lines[-1]), requires_elevation=requires_elevation)
 
 
 def launch_installer_process(command: Sequence[str], *, cwd: Path):
@@ -761,7 +775,31 @@ def launch_installer_process(command: Sequence[str], *, cwd: Path):
             "Installer requires elevation for command %s. Relaunching it through Windows Shell.",
             command,
         )
-        return _shell_start_process(command, cwd=cwd)
+        return _shell_start_process(command, cwd=cwd, requires_elevation=True)
+
+
+def _is_interactive_installer_command(profile: SoftwareInstallProfile, command: Sequence[str]) -> bool:
+    if len(command) == 1:
+        return Path(command[0]).resolve(strict=False) == profile.installer_path.resolve(strict=False)
+    lowered_arguments = {argument.casefold() for argument in command[1:]}
+    return not lowered_arguments.intersection({"/qn", "/quiet", "/passive", "/s", "/silent", "/verysilent"})
+
+
+def _elevated_installer_guidance(profile: SoftwareInstallProfile, *, observed_titles: Sequence[str]) -> str:
+    return (
+        f"The installer for {profile.software} requires administrator elevation, but initialize_environment.py "
+        "is not running as Administrator. Windows will not let this lower-privilege process observe or automate "
+        "the elevated installer UI, so the install can stall behind a UAC prompt or an unseen elevated window. "
+        "Re-run initialize_environment.cmd as Administrator, or preinstall the software manually. "
+        f"Last installer windows: {list(observed_titles[:5])}"
+    )
+
+
+def _skip_interactive_elevated_installer_message(profile: SoftwareInstallProfile) -> str:
+    return (
+        f"Skipping interactive installer fallback for {profile.software} because the installer requires "
+        "administrator elevation and initialize_environment.py is not running as Administrator."
+    )
 
 
 def create_or_update_shortcut(shortcut_path: Path, target_path: Path) -> None:
@@ -1299,12 +1337,11 @@ def _wait_for_installer_completion(
     exit_code: int | None = None
     exit_deadline: float | None = None
     observed_titles: list[str] = []
+    elevated_automation_deadline: float | None = None
+    if getattr(process, "requires_elevation", False) and not _current_process_is_elevated():
+        elevated_automation_deadline = time.monotonic() + ELEVATED_INSTALLER_DIAGNOSTIC_TIMEOUT_SECONDS
 
     while time.monotonic() < deadline:
-        installed_executable = detect_installed_executable(profile)
-        if installed_executable is not None:
-            return installed_executable
-
         windows = _list_candidate_installer_windows(profile, process)
         if windows:
             observed_titles = [_safe_window_text(window) for window in windows if _safe_window_text(window)]
@@ -1313,6 +1350,10 @@ def _wait_for_installer_completion(
                 progressed = _advance_installer_window(window, profile) or progressed
             time.sleep(INSTALLER_ACTION_SETTLE_SECONDS if progressed else INSTALLER_POLL_SECONDS)
             continue
+
+        installed_executable = detect_installed_executable(profile)
+        if installed_executable is not None:
+            return installed_executable
 
         if exit_code is None:
             exit_code = process.poll()
@@ -1332,6 +1373,11 @@ def _wait_for_installer_completion(
                     f"Last installer windows: {observed_titles[:5]}"
                 )
             break
+
+        if elevated_automation_deadline is not None and not observed_titles and time.monotonic() >= elevated_automation_deadline:
+            raise AssertionError(
+                _elevated_installer_guidance(profile, observed_titles=observed_titles)
+            )
 
         time.sleep(INSTALLER_POLL_SECONDS)
 
@@ -1415,7 +1461,13 @@ def run_installer(
     if recorder is not None:
         recorder.record("installer", "started", software=profile.software, installer_path=str(profile.installer_path))
     failures: list[str] = []
+    skip_interactive_fallback = False
     for command in commands:
+        if skip_interactive_fallback and _is_interactive_installer_command(profile, command):
+            message = _skip_interactive_elevated_installer_message(profile)
+            logger.warning(message)
+            failures.append(f"{command!r}: {message}")
+            continue
         logger.info("Trying installer command: %s", command)
         process = launch_installer_process(command, cwd=profile.installer_path.parent)
         try:
@@ -1442,6 +1494,8 @@ def run_installer(
                 exc,
             )
             failures.append(f"{command!r}: {exc}")
+            if getattr(process, "requires_elevation", False) and not _current_process_is_elevated():
+                skip_interactive_fallback = True
             terminate_process_tree(process)
             continue
     if recorder is not None:

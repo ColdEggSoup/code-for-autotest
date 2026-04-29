@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import initialize_environment
+import pytest
 
 
 class _DummyRect:
@@ -226,6 +228,45 @@ def test_advance_installer_window_accepts_license_then_clicks_next(monkeypatch, 
     assert actions == ["advance", "accept", "advance"]
 
 
+def test_wait_for_installer_completion_closes_finish_window_before_returning(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    profile = _build_profile(tmp_path)
+    installed_executable = tmp_path / "avidemux.exe"
+    installed_executable.write_bytes(b"exe")
+    finish_button = _DummyWindow("Finish", 4242, top=100, left=120, width=90, height=28, control_type="Button")
+    window = _DummyWindow(
+        "Avidemux VC++ 64bits Setup",
+        4242,
+        top=10,
+        left=10,
+        width=640,
+        height=420,
+        children=[finish_button],
+    )
+    window_batches = iter(([window], []))
+    detected_paths = iter((installed_executable,))
+
+    monkeypatch.setattr(initialize_environment, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(initialize_environment, "detect_installed_executable", lambda _profile: next(detected_paths))
+    monkeypatch.setattr(
+        initialize_environment,
+        "_list_candidate_installer_windows",
+        lambda _profile, _process: next(window_batches),
+    )
+    monkeypatch.setattr(initialize_environment.time, "sleep", lambda _seconds: None)
+
+    executable = initialize_environment._wait_for_installer_completion(
+        profile,
+        initialize_environment.ShellStartedProcess(4242),
+        timeout_seconds=30.0,
+    )
+
+    assert executable == installed_executable
+    assert finish_button.clicks == [None]
+
+
 def test_find_row_toggle_prefers_checkbox_left_of_label(monkeypatch, tmp_path: Path) -> None:
     _ = monkeypatch
     _ = tmp_path
@@ -314,3 +355,69 @@ def test_accept_license_terms_uses_label_hitbox_for_generic_toggle(monkeypatch, 
 
     assert initialize_environment._accept_license_terms(window) is True
     assert clicks == ["hitbox"]
+
+
+def test_wait_for_installer_completion_fails_fast_for_non_admin_elevated_installer(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    profile = _build_profile(tmp_path)
+    process = initialize_environment.ShellStartedProcess(None, requires_elevation=True)
+    monotonic_values = iter((0.0, 0.0, 30.0, 95.0))
+
+    monkeypatch.setattr(initialize_environment, "detect_installed_executable", lambda _profile: None)
+    monkeypatch.setattr(initialize_environment, "_list_candidate_installer_windows", lambda _profile, _process: [])
+    monkeypatch.setattr(initialize_environment, "_current_process_is_elevated", lambda: False)
+    monkeypatch.setattr(initialize_environment.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(initialize_environment.time, "monotonic", lambda: next(monotonic_values))
+
+    with pytest.raises(AssertionError, match="run initialize_environment\\.cmd as Administrator"):
+        initialize_environment._wait_for_installer_completion(profile, process, timeout_seconds=900.0)
+
+
+def test_run_installer_skips_interactive_fallback_after_non_admin_elevated_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    installer_path = tmp_path / "installer.exe"
+    installer_path.write_bytes(b"installer")
+    profile = replace(
+        _build_profile(tmp_path),
+        installer_path=installer_path,
+        silent_argument_sets=(("/S",),),
+        prefer_silent=True,
+    )
+    launch_calls: list[list[str]] = []
+    terminated_pids: list[int | None] = []
+
+    monkeypatch.setattr(
+        initialize_environment,
+        "installer_commands",
+        lambda _profile: [[str(installer_path), "/S"], [str(installer_path)]],
+    )
+
+    def _launch(command, *, cwd):
+        _ = cwd
+        launch_calls.append(list(command))
+        return initialize_environment.ShellStartedProcess(4242, requires_elevation=True)
+
+    monkeypatch.setattr(initialize_environment, "launch_installer_process", _launch)
+    monkeypatch.setattr(
+        initialize_environment,
+        "_wait_for_installer_completion",
+        lambda _profile, _process, *, timeout_seconds: (_ for _ in ()).throw(
+            AssertionError("silent install stalled behind elevation")
+        ),
+    )
+    monkeypatch.setattr(initialize_environment, "_current_process_is_elevated", lambda: False)
+    monkeypatch.setattr(
+        initialize_environment,
+        "terminate_process_tree",
+        lambda process: terminated_pids.append(getattr(process, "pid", None)),
+    )
+
+    with pytest.raises(AssertionError, match="Skipping interactive installer fallback"):
+        initialize_environment.run_installer(profile)
+
+    assert launch_calls == [[str(installer_path), "/S"]]
+    assert terminated_pids == [4242]

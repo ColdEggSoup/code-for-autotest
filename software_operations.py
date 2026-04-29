@@ -67,6 +67,36 @@ SHOTCUT_OPEN_BUTTON_PATTERNS = (r"^\u6253\u5f00\u6587\u4ef6$", r"^Open File$")
 SHOTCUT_OUTPUT_BUTTON_PATTERNS = (r"^\u8f93\u51fa$", r"^Export$")
 SHOTCUT_TASKS_BUTTON_PATTERNS = (r"^\u4efb\u52a1$", r"^Jobs$")
 SHOTCUT_PAUSE_QUEUE_PATTERNS = (r"^\u6682\u505c\u961f\u5217$", r"^Pause Queue$")
+SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS = (
+    r"^The project has been modified.*$",
+    r"^Do you want to save your changes.*$",
+    r"^Save your changes.*$",
+    r"^.*\u9879\u76ee\u5df2\u88ab\u4fee\u6539.*$",
+    r"^.*\u4f60\u60f3\u4fdd\u5b58.*\u4fee\u6539.*$",
+)
+SHOTCUT_RECOVERY_TEXT_PATTERNS = (
+    r"^Autosave files exist.*$",
+    r"^Do you want to recover.*$",
+    r"^.*autosave.*recover.*$",
+    r"^.*\u81ea\u52a8\u4fdd\u5b58.*\u6587\u4ef6.*$",
+    r"^.*\u60a8\u60f3\u6062\u590d.*$",
+    r"^.*\u6062\u590d\u5b83\u4eec.*$",
+)
+SHOTCUT_RECOVERY_DISMISS_PATTERNS = (
+    r"^No(?:\([A-Z]\))?$",
+    r"^\u5426(?:\([A-Z]\))?$",
+    r"^Do not recover(?:\([A-Z]\))?$",
+)
+SHOTCUT_RECOVERY_DISMISS_KEY = "%n"
+SHOTCUT_DONT_SAVE_DIRECT_KEYS = ("%n", "n")
+SHOTCUT_DONT_SAVE_PATTERNS = (
+    r"^No(?:\([A-Z]\))?$",
+    r"^\u5426(?:\([A-Z]\))?$",
+    r"^Don't Save(?:\([A-Z]\))?$",
+    r"^Discard(?:\([A-Z]\))?$",
+)
+SHOTCUT_APPEND_TO_TIMELINE_SHORTCUT = "a"
+SHOTCUT_CLOSE_HOTKEY = "%{F4}"
 
 SHOTCUT_RECONNECT_TIMEOUT_SECONDS = 8.0
 SHOTCUT_DIALOG_TIMEOUT_SECONDS = 5.0
@@ -76,6 +106,8 @@ SHOTCUT_EXPORT_BUTTON_RETRY_COUNT = 2
 SHOTCUT_EXPORT_BUTTON_POST_CLICK_SECONDS = 0.5
 SHOTCUT_JOBS_TIMEOUT_SECONDS = 6.0
 SHOTCUT_EXPORT_POLL_SECONDS = 1.0
+SHOTCUT_SAVE_DIALOG_OVERWRITE_TIMEOUT_SECONDS = 0.5
+WAIT_PROGRESS_LOG_INTERVAL_SECONDS = 15.0
 
 AVIDEMUX_MAIN_WINDOW_CLASS = "MainWindow"
 AVIDEMUX_OPEN_DIALOG_PATTERNS = (
@@ -121,8 +153,8 @@ AVIDEMUX_ACTION_BUTTON_TOP_MIN = 680
 AVIDEMUX_ACTION_BUTTON_TOP_MAX = 820
 AVIDEMUX_OPEN_CONFIRM_GAP_RATIO = 0.14
 AVIDEMUX_OPEN_CONFIRM_MIN_GAP = 12
-AVIDEMUX_VIDEO_CODEC_TEXT = "Mpeg4 AVC (x264)"
-AVIDEMUX_MP4_MUXER_TEXT = "MP4 Muxer"
+AVIDEMUX_VIDEO_CODEC_TEXT = "HEVC (x265)"
+AVIDEMUX_MUXER_TEXT = "MKV Muxer"
 AVIDEMUX_YES_PATTERNS = (r"^Yes$", r"^\u662f$")
 AVIDEMUX_OVERWRITE_CONFIRM_PATTERNS = (
     r"^Yes(?:\([A-Z]\))?$",
@@ -168,6 +200,10 @@ AVIDEMUX_MINIMIZE_TO_TRAY_PATTERNS = (
     r"^\u7f29\u5230\u5de5\u5177\u680f\u4e0a$",
     r"^\u6700\u5c0f\u5316\u5230\u6258\u76d8$",
 )
+AVIDEMUX_TRAY_BUTTON_MAX_WIDTH = 220
+AVIDEMUX_TRAY_BUTTON_MAX_HEIGHT = 80
+AVIDEMUX_TRAY_BUTTON_BOTTOM_REGION_RATIO = 0.35
+AVIDEMUX_TRAY_BUTTON_LEFT_REGION_RATIO = 0.45
 
 HAND_BRAKE_SELECT_FILE_PATTERNS = (
     r"^\u9009\u62e9\u8981\u626b\u63cf\u7684\u6587\u4ef6$",
@@ -221,6 +257,25 @@ HAND_BRAKE_SOURCE_DESTINATION_SUFFIXES = (".mp4", ".m4v", ".mkv", ".webm")
 HAND_BRAKE_DESTINATION_EDIT_MIN_WIDTH = 160
 HAND_BRAKE_SOURCE_NAME_MIN_TEXT_LENGTH = 4
 HAND_BRAKE_TARGET_PRESET_TEXT = "HQ 2160P60 4K HEVC Surround"
+HAND_BRAKE_PRESET_VALUE_HINTS = (
+    "2160p",
+    "1080p",
+    "720p",
+    "576p",
+    "480p",
+    "hq",
+    "fast",
+    "super hq",
+    "hevc",
+    "h.265",
+    "h265",
+    "av1",
+    "h.264",
+    "h264",
+    "surround",
+    "preset",
+)
+HAND_BRAKE_TITLE_SELECTOR_VALUE_RE = r"^\d+\s*\(.+\)$"
 
 KDENLIVE_OPEN_DIALOG_PATTERNS = (
     r"^Kdenlive$",
@@ -292,6 +347,7 @@ KDENLIVE_DONT_SAVE_PATTERNS = (
     r"^\u4e0d\u4fdd\u5b58(?:\s*\(.+\))?$",
     r"^\u5426(?:\s*\(.+\))?$",
 )
+KDENLIVE_DONT_SAVE_DIRECT_KEYS = ("%d", "%n", "d", "n")
 KDENLIVE_DIALOG_CANCEL_PATTERNS = (r"^Cancel(?:\([A-Z]\))?$", r"^\u53d6\u6d88(?:\([A-Z]\))?$")
 KDENLIVE_PROFILE_SWITCH_TEXT_PATTERNS = (
     r"^Switch to clip .*\bprofile\b.*\?$",
@@ -359,7 +415,8 @@ SHUTTER_ENCODER_FUNCTION_PICKER_PATTERNS = (
     r"^Function$",
     r"^\u9009\u62e9\u529f\u80fd$",
 )
-SHUTTER_ENCODER_H264_PATTERNS = (r"^H\.264$",)
+SHUTTER_ENCODER_TARGET_FUNCTION_TEXT = "H.265"
+SHUTTER_ENCODER_TARGET_FUNCTION_PATTERNS = (r"^H\.265$",)
 SHUTTER_ENCODER_START_BUTTON_PATTERNS = (
     r"^Start function$",
     r"^Start Function$",
@@ -447,7 +504,7 @@ OPERATION_PROFILES = {
     "avidemux": OperationProfile(
         software="avidemux",
         main_window_title_re=SOFTWARE_SPECS["avidemux"].main_window_title_re,
-        output_suffix=".mp4",
+        output_suffix=".mkv",
         import_hotkey="^o",
         save_hotkey="^s",
     ),
@@ -556,7 +613,171 @@ class SoftwareOperator:
             time.sleep(self.profile.export_wait_seconds)
 
 
+def _format_elapsed_hms(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+class _WaitProgressLogger:
+    def __init__(self, label: str, *, interval_seconds: float = WAIT_PROGRESS_LOG_INTERVAL_SECONDS) -> None:
+        self.label = label
+        self.interval_seconds = max(1.0, interval_seconds)
+        self.started_at = time.monotonic()
+        self.next_log_at = self.started_at + self.interval_seconds
+
+    def elapsed_seconds(self) -> float:
+        return max(0.0, time.monotonic() - self.started_at)
+
+    def elapsed_text(self) -> str:
+        return _format_elapsed_hms(self.elapsed_seconds())
+
+    def maybe_log(self, *, detail: str = "") -> None:
+        now = time.monotonic()
+        if now < self.next_log_at:
+            return
+        suffix = f" {detail}" if detail else ""
+        logger.info("%s in progress. elapsed=%s%s", self.label, self.elapsed_text(), suffix)
+        self.next_log_at = now + self.interval_seconds
+
+
 class ShotcutOperator(SoftwareOperator):
+    def _wrapper_text(self, wrapper) -> str:
+        try:
+            return (wrapper.window_text() or "").strip()
+        except Exception:
+            return ""
+
+    def _process_id(self, window) -> int | None:
+        try:
+            process_id = getattr(getattr(window, "element_info", None), "process_id", None)
+        except Exception:
+            return None
+        return int(process_id) if process_id else None
+
+    def _iter_wrapper_tree(self, root):
+        yield root
+        for child in root.descendants():
+            yield child
+
+    def _matches_patterns(self, text: str, patterns: tuple[str, ...]) -> bool:
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+    def _iter_process_top_level_windows(self, process_id: int | None):
+        if process_id is None:
+            return []
+        from pywinauto import Desktop
+
+        matches = []
+        for window in Desktop(backend="uia").windows():
+            if self._process_id(window) != process_id:
+                continue
+            try:
+                rect = window.rectangle()
+                area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+            except Exception:
+                area = 0
+            matches.append((-area, self._wrapper_text(window).casefold(), window))
+        matches.sort(key=lambda item: (item[0], item[1]))
+        return [item[2] for item in matches]
+
+    def _dialog_matches(self, dialog, *, text_patterns: tuple[str, ...]) -> bool:
+        for wrapper in self._iter_wrapper_tree(dialog):
+            text = self._wrapper_text(wrapper)
+            if text and self._matches_patterns(text, text_patterns):
+                return True
+        return False
+
+    def _dismiss_save_changes_dialog_if_present(self, owner_window, *, timeout: float = 3.0) -> bool:
+        process_id = self._process_id(owner_window)
+        owner_handle = getattr(owner_window, "handle", None)
+        deadline = time.monotonic() + timeout
+        dismissed = False
+        while time.monotonic() < deadline:
+            dialog = None
+            for candidate in self._iter_process_top_level_windows(process_id):
+                if owner_handle is not None and getattr(candidate, "handle", None) == owner_handle:
+                    continue
+                if not self._dialog_matches(candidate, text_patterns=SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS):
+                    continue
+                dialog = candidate
+                break
+            if dialog is None:
+                return dismissed
+            try:
+                bring_window_to_front(dialog, keep_topmost=False)
+            except Exception:
+                pass
+            try:
+                button = find_text_control(dialog, SHOTCUT_DONT_SAVE_PATTERNS, control_types=("Button",))
+            except Exception:
+                logger.info(
+                    "Shotcut save-changes dialog was found, but a discard-style button was not directly exposed. "
+                    "Trying keyboard dismiss shortcuts before generic close-prompt dismissal."
+                )
+                for key in SHOTCUT_DONT_SAVE_DIRECT_KEYS:
+                    try:
+                        logger.info("Sending Shotcut discard shortcut: %s", key)
+                        send_hotkey(key)
+                    except Exception:
+                        pass
+                dismiss_close_prompts(timeout=0.8, owner_window=dialog)
+                time.sleep(0.2)
+                dismissed = True
+                continue
+            logger.info("Clicking the Shotcut discard-style button: %s", self._wrapper_text(button) or "<untitled>")
+            try:
+                click_control(button, post_click_sleep=0.5)
+            except Exception as exc:
+                logger.info(
+                    "Clicking the Shotcut discard-style button failed. Falling back to keyboard shortcuts. details=%s",
+                    exc,
+                )
+                for key in SHOTCUT_DONT_SAVE_DIRECT_KEYS:
+                    try:
+                        logger.info("Sending Shotcut discard shortcut: %s", key)
+                        send_hotkey(key)
+                    except Exception:
+                        pass
+                dismiss_close_prompts(timeout=0.8, owner_window=dialog)
+            dismissed = True
+        return dismissed
+
+    def _dismiss_recovery_dialog_if_present(self, owner_window, *, timeout: float = 1.5) -> bool:
+        process_id = self._process_id(owner_window)
+        deadline = time.monotonic() + timeout
+        dismissed = False
+        while time.monotonic() < deadline:
+            dialog = None
+            for candidate in self._iter_process_top_level_windows(process_id):
+                if not self._dialog_matches(candidate, text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS):
+                    continue
+                dialog = candidate
+                break
+            if dialog is None:
+                if self._dialog_matches(owner_window, text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS):
+                    dialog = owner_window
+                else:
+                    return dismissed
+            try:
+                bring_window_to_front(dialog, keep_topmost=False)
+            except Exception:
+                pass
+            try:
+                button = find_text_control(dialog, SHOTCUT_RECOVERY_DISMISS_PATTERNS, control_types=("Button",))
+                logger.info("Clicking the Shotcut recovery-dismiss button: %s", self._wrapper_text(button) or "<untitled>")
+                click_control(button, post_click_sleep=0.5)
+            except Exception:
+                logger.info("Shotcut recovery dialog was found, but the dismiss button was not directly exposed. Sending 'N'.")
+                try:
+                    send_hotkey(SHOTCUT_RECOVERY_DISMISS_KEY)
+                except Exception:
+                    pass
+                time.sleep(0.2)
+            dismissed = True
+        return dismissed
+
     def perform(self, input_video_path: Path, output_video_path: Path) -> None:
         logger.info("Shotcut flow started. input=%s output=%s", input_video_path, output_video_path)
         logger.info("Validating Shotcut input and output paths.")
@@ -566,34 +787,37 @@ class ShotcutOperator(SoftwareOperator):
 
         logger.info("Connecting to Shotcut main window.")
         window = self._connect_main_window(timeout=max(30.0, SOFTWARE_SPECS["shotcut"].startup_timeout_seconds))
+        if self._dismiss_recovery_dialog_if_present(window, timeout=2.0):
+            logger.info("Reconnecting to Shotcut after dismissing the autosave recovery dialog.")
+            window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
         bring_window_to_front(window, keep_topmost=False)
-
-        logger.info("Locating Shotcut toolbar.")
-        toolbar = self._find_child_by_class_name(window, "QToolBar")
-        logger.info("Opening Shotcut input dialog.")
-        self._open_input_dialog(toolbar)
-        logger.info("Filling Shotcut input dialog with selected video.")
-        fill_file_dialog(input_video_path, dialog_patterns=OPEN_DIALOG_PATTERNS, must_exist=True)
-
-        logger.info("Reconnecting to Shotcut after input selection.")
-        window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
-        bring_window_to_front(window, keep_topmost=False)
-        toolbar = self._find_child_by_class_name(window, "QToolBar")
-        encode_dock = self._find_child_by_class_name(window, "EncodeDock")
-
-        logger.info("Waiting for Shotcut export controls to become ready.")
-        self._wait_for_export_ready(encode_dock)
-        logger.info("Opening Shotcut output pane.")
-        self._show_output_pane(toolbar, encode_dock)
-        logger.info("Opening Shotcut export save dialog.")
-        self._export_clip(encode_dock, output_video_path)
-
-        logger.info("Asserting that the export job has been queued.")
-        window, jobs_root = self._assert_task_queued_with_recovery(window, toolbar, output_video_path)
-        self._begin_background_wait(window, phase="export")
-        logger.info("Waiting for Shotcut export completion.")
-        self._wait_for_export_completion(jobs_root, output_video_path)
+        window = self._open_input_clip(window, input_video_path)
+        logger.info("Appending the imported Shotcut clip to the timeline before export.")
+        self._append_selected_clip_to_timeline(window)
+        self._export_current_timeline(window, output_video_path)
         self.close()
+
+    def close(self) -> None:
+        logger.info("Closing Shotcut.")
+        try:
+            window = self._connect_main_window(timeout=2.0)
+        except UiAutomationError:
+            logger.info("Shotcut window is already closed.")
+            return
+        bring_window_to_front(window, keep_topmost=False)
+        self._dismiss_save_changes_dialog_if_present(window, timeout=0.5)
+        try:
+            logger.info("Requesting Shotcut shutdown with hotkey: %s", SHOTCUT_CLOSE_HOTKEY)
+            send_hotkey(SHOTCUT_CLOSE_HOTKEY)
+        except Exception as exc:
+            logger.info("Shotcut close hotkey raised %s. Falling back to WM_CLOSE.", exc)
+        self._dismiss_save_changes_dialog_if_present(window, timeout=1.5)
+        try:
+            request_window_close(window)
+        except Exception as exc:
+            logger.info("Shotcut WM_CLOSE fallback raised %s.", exc)
+        self._dismiss_save_changes_dialog_if_present(window, timeout=3.0)
+        dismiss_close_prompts(timeout=1.5, owner_window=window)
 
     def _find_child_by_class_name(self, window, class_name: str):
         logger.info("Locating Shotcut child control by class name: %s", class_name)
@@ -644,21 +868,120 @@ class ShotcutOperator(SoftwareOperator):
         logger.info("Using the Shotcut main window as the Jobs search root.")
         return window
 
-    def _open_input_dialog(self, toolbar) -> None:
-        logger.info("Waiting for Shotcut 'Open File' button.")
-        open_button = wait_for_text_control(
-            toolbar,
-            SHOTCUT_OPEN_BUTTON_PATTERNS,
-            control_types=("Button",),
-            timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
+    def _append_selected_clip_to_timeline(self, window) -> None:
+        logger.info("Appending the selected Shotcut clip to the timeline with shortcut '%s'.", SHOTCUT_APPEND_TO_TIMELINE_SHORTCUT.upper())
+        bring_window_to_front(window, keep_topmost=False)
+        send_hotkey(SHOTCUT_APPEND_TO_TIMELINE_SHORTCUT)
+
+    def _open_input_clip(self, window, input_video_path: Path):
+        if self._dismiss_save_changes_dialog_if_present(window, timeout=0.8):
+            logger.info("Shotcut save-changes dialog was blocking the next import. Reconnecting to the main window.")
+            window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+            bring_window_to_front(window, keep_topmost=False)
+        logger.info("Locating Shotcut toolbar.")
+        toolbar = self._find_child_by_class_name(window, "QToolBar")
+        logger.info("Opening Shotcut input dialog.")
+        self._open_input_dialog(window, toolbar)
+        logger.info("Filling Shotcut input dialog with selected video.")
+        fill_file_dialog(input_video_path, dialog_patterns=OPEN_DIALOG_PATTERNS, must_exist=True)
+        logger.info("Reconnecting to Shotcut after input selection.")
+        window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+        bring_window_to_front(window, keep_topmost=False)
+        return window
+
+    def _export_current_timeline(self, window, output_video_path: Path):
+        logger.info("Locating Shotcut controls for export.")
+        bring_window_to_front(window, keep_topmost=False)
+        toolbar = self._find_child_by_class_name(window, "QToolBar")
+        encode_dock = self._find_child_by_class_name(window, "EncodeDock")
+        logger.info("Waiting for Shotcut export controls to become ready.")
+        self._wait_for_export_ready(encode_dock)
+        logger.info("Opening Shotcut output pane.")
+        self._show_output_pane(toolbar, encode_dock)
+        logger.info("Opening Shotcut export save dialog.")
+        self._export_clip(encode_dock, output_video_path)
+        self._begin_background_wait(
+            window,
+            phase="export",
         )
-        assert open_button.is_visible(), "Shotcut toolbar 'Open File' button is not visible."
-        logger.info("Clicking Shotcut 'Open File' button.")
-        open_button.click_input()
-        time.sleep(0.5)
+        logger.info("Waiting for Shotcut export completion.")
+        self._wait_for_export_completion(output_video_path)
+        return window
+
+    def _wait_for_open_file_dialog(self, *, timeout: float) -> None:
         logger.info("Waiting for Shotcut open-file dialog.")
-        dialog = wait_for_file_dialog(dialog_patterns=OPEN_DIALOG_PATTERNS, timeout=SHOTCUT_DIALOG_TIMEOUT_SECONDS)
+        dialog = wait_for_file_dialog(dialog_patterns=OPEN_DIALOG_PATTERNS, timeout=timeout)
         assert dialog is not None, "Shotcut did not open the input file dialog."
+
+    def _open_input_dialog(self, window, toolbar) -> None:
+        last_error: Exception | None = None
+        current_window = window
+        current_toolbar = toolbar
+        for attempt_index in range(3):
+            if self._dismiss_save_changes_dialog_if_present(current_window, timeout=0.4):
+                logger.info(
+                    "Shotcut save-changes dialog interrupted the next import. Reconnecting before retrying the open-file flow."
+                )
+                try:
+                    current_window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+                    current_toolbar = self._find_child_by_class_name(current_window, "QToolBar")
+                except Exception:
+                    pass
+            self._dismiss_recovery_dialog_if_present(current_window, timeout=0.4)
+            logger.info("Waiting for Shotcut 'Open File' button.")
+            open_button = wait_for_text_control(
+                current_toolbar,
+                SHOTCUT_OPEN_BUTTON_PATTERNS,
+                control_types=("Button",),
+                timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
+            )
+            assert open_button.is_visible(), "Shotcut toolbar 'Open File' button is not visible."
+            logger.info("Clicking Shotcut 'Open File' button.")
+            open_button.click_input()
+            time.sleep(0.5)
+            try:
+                self._wait_for_open_file_dialog(timeout=SHOTCUT_DIALOG_TIMEOUT_SECONDS)
+                return
+            except Exception as exc:
+                last_error = exc
+                save_changes_dismissed = self._dismiss_save_changes_dialog_if_present(current_window, timeout=0.8)
+                if save_changes_dismissed:
+                    logger.info("Shotcut save-changes dialog interrupted the open-file flow. Retrying the import dialog.")
+                recovery_dismissed = self._dismiss_recovery_dialog_if_present(current_window, timeout=0.8)
+                if recovery_dismissed:
+                    logger.info("Shotcut autosave recovery dialog interrupted the open-file flow. Retrying the import dialog.")
+                logger.info("Shotcut open-file button path did not open the dialog. Trying Ctrl+O fallback. details=%s", exc)
+                if save_changes_dismissed:
+                    try:
+                        current_window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+                        current_toolbar = self._find_child_by_class_name(current_window, "QToolBar")
+                    except Exception:
+                        pass
+                try:
+                    bring_window_to_front(current_window, keep_topmost=False)
+                except Exception:
+                    pass
+                send_hotkey("^o")
+                time.sleep(0.5)
+                try:
+                    self._wait_for_open_file_dialog(timeout=SHOTCUT_DIALOG_TIMEOUT_SECONDS)
+                    return
+                except Exception as hotkey_exc:
+                    last_error = hotkey_exc
+                    save_changes_dismissed = self._dismiss_save_changes_dialog_if_present(current_window, timeout=0.8)
+                    if save_changes_dismissed:
+                        logger.info(
+                            "Shotcut save-changes dialog also interrupted the Ctrl+O fallback. Refreshing the main window before retry."
+                        )
+                    self._dismiss_recovery_dialog_if_present(current_window, timeout=0.8)
+                    logger.info("Shotcut Ctrl+O fallback did not open the dialog. Refreshing the main window before retry. details=%s", hotkey_exc)
+                    try:
+                        current_window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
+                        current_toolbar = self._find_child_by_class_name(current_window, "QToolBar")
+                    except Exception:
+                        pass
+                    continue
+        raise AssertionError("Shotcut did not open the input file dialog after button, recovery, and Ctrl+O retries.") from last_error
 
     def _wait_for_export_ready(self, encode_dock) -> None:
         logger.info("Waiting for Shotcut export button control to appear.")
@@ -734,6 +1057,8 @@ class ShotcutOperator(SoftwareOperator):
                     confirm_patterns=SHOTCUT_SAVE_CONFIRM_PATTERNS,
                     timeout=SHOTCUT_DIALOG_TIMEOUT_SECONDS,
                     must_exist=False,
+                    wait_for_dialog_to_close=False,
+                    overwrite_confirmation_timeout=SHOTCUT_SAVE_DIALOG_OVERWRITE_TIMEOUT_SECONDS,
                 )
                 logger.info("Shotcut export save dialog completed.")
                 return
@@ -795,44 +1120,80 @@ class ShotcutOperator(SoftwareOperator):
         assert task_item.is_visible(), f"Shotcut jobs pane did not queue '{output_video_path}'."
         return jobs_root
 
-    def _wait_for_export_completion(self, jobs_dock, output_video_path: Path) -> None:
+    def _wait_for_export_output_start(self, output_video_path: Path, *, timeout: float = 20.0) -> None:
+        logger.info("Waiting for Shotcut export output to start writing.")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                window = self._connect_main_window(timeout=0.2)
+            except Exception:
+                window = None
+            if window is not None:
+                self._dismiss_recovery_dialog_if_present(window, timeout=0.2)
+            if output_video_path.exists() and output_video_path.stat().st_size > 0:
+                logger.info("Shotcut export output has started: %s", output_video_path)
+                return
+            time.sleep(0.2)
+        raise AssertionError(f"Shotcut export output did not start within timeout: {output_video_path}")
+
+    def _wait_for_export_completion(self, output_video_path: Path, jobs_dock=None) -> None:
         logger.info("Validating Shotcut output directory before waiting for completion.")
         assert output_video_path.parent.exists(), f"Output directory disappeared: {output_video_path.parent}"
 
         stable_rounds = 0
         last_size = -1
-        last_reported_size = -1
         deadline = time.monotonic() + 7200.0
+        progress_logger = _WaitProgressLogger("Shotcut export")
         logger.info("Monitoring Shotcut export output until file size stabilizes.")
         while time.monotonic() < deadline:
-            task_item_present = control_exists(
-                jobs_dock,
-                re.escape(str(output_video_path)),
-                control_types=("TreeItem", "Text"),
-            )
-            time_item_present = control_exists(
-                jobs_dock,
-                SHOTCUT_TASK_TIME_PATTERN,
-                control_types=("TreeItem",),
-            )
+            try:
+                window = self._connect_main_window(timeout=0.2)
+            except Exception:
+                window = None
+            if window is not None:
+                self._dismiss_recovery_dialog_if_present(window, timeout=0.2)
+            task_item_present = False
+            time_item_present = False
+            if jobs_dock is not None:
+                task_item_present = control_exists(
+                    jobs_dock,
+                    re.escape(str(output_video_path)),
+                    control_types=("TreeItem", "Text"),
+                )
+                time_item_present = control_exists(
+                    jobs_dock,
+                    SHOTCUT_TASK_TIME_PATTERN,
+                    control_types=("TreeItem",),
+                )
             if output_video_path.exists():
                 current_size = output_video_path.stat().st_size
-                if current_size != last_reported_size:
-                    logger.info(
-                        "Shotcut export progress. output=%s size_bytes=%d stable_rounds=%d",
-                        output_video_path,
-                        current_size,
-                        stable_rounds,
-                    )
-                    last_reported_size = current_size
                 if current_size > 0 and current_size == last_size:
                     stable_rounds += 1
                 else:
                     stable_rounds = 0
                 last_size = current_size
+                progress_logger.maybe_log(
+                    detail=(
+                        f"output={output_video_path.name} size_bytes={current_size} "
+                        f"stable_rounds={stable_rounds}"
+                    )
+                )
                 if task_item_present and time_item_present and stable_rounds >= 3:
-                    logger.info("Shotcut export completion conditions satisfied.")
+                    logger.info("Shotcut export completion conditions satisfied. elapsed=%s", progress_logger.elapsed_text())
                     break
+                if jobs_dock is None and stable_rounds >= 3 and current_size > 0:
+                    logger.info(
+                        "Shotcut export completion detected from stable output growth without reopening the Jobs pane. elapsed=%s",
+                        progress_logger.elapsed_text(),
+                    )
+                    break
+            else:
+                progress_logger.maybe_log(
+                    detail=(
+                        f"output={output_video_path.name} pending_creation=true "
+                        f"stable_rounds={stable_rounds}"
+                    )
+                )
             time.sleep(SHOTCUT_EXPORT_POLL_SECONDS)
         else:
             raise AssertionError(f"Shotcut export did not finish within timeout: {output_video_path}")
@@ -841,18 +1202,19 @@ class ShotcutOperator(SoftwareOperator):
         assert output_video_path.exists() and output_video_path.stat().st_size > 0, (
             f"Shotcut export output was not created correctly: {output_video_path}"
         )
-        logger.info("Validating Shotcut completed job row.")
-        assert control_exists(
-            jobs_dock,
-            re.escape(str(output_video_path)),
-            control_types=("TreeItem", "Text"),
-        ), f"Shotcut completed row for '{output_video_path}' is missing from the jobs pane."
-        logger.info("Validating Shotcut completed job duration.")
-        assert control_exists(
-            jobs_dock,
-            SHOTCUT_TASK_TIME_PATTERN,
-            control_types=("TreeItem",),
-        ), "Shotcut jobs pane did not show the completed task duration."
+        if jobs_dock is not None:
+            logger.info("Validating Shotcut completed job row.")
+            assert control_exists(
+                jobs_dock,
+                re.escape(str(output_video_path)),
+                control_types=("TreeItem", "Text"),
+            ), f"Shotcut completed row for '{output_video_path}' is missing from the jobs pane."
+            logger.info("Validating Shotcut completed job duration.")
+            assert control_exists(
+                jobs_dock,
+                SHOTCUT_TASK_TIME_PATTERN,
+                control_types=("TreeItem",),
+            ), "Shotcut jobs pane did not show the completed task duration."
         time.sleep(1.0)
 
 
@@ -914,6 +1276,31 @@ class AvidemuxOperator(SoftwareOperator):
         rect = self._wrapper_rect(window)
         return max(1, rect.right - rect.left), max(1, rect.bottom - rect.top)
 
+    def _click_wrapper_center(self, wrapper, *, settle_seconds: float = 0.3) -> None:
+        try:
+            wrapper.click_input()
+            time.sleep(settle_seconds)
+            return
+        except Exception as exc:
+            logger.info(
+                "Direct click failed for '%s'. Falling back to a center-coordinate click: %s",
+                self._wrapper_text(wrapper) or "<untitled>",
+                exc,
+            )
+        try:
+            top_level = wrapper.top_level_parent()
+        except Exception:
+            top_level = wrapper
+        rect = self._wrapper_rect(wrapper)
+        top_rect = self._wrapper_rect(top_level)
+        click_x_abs = rect.left + max(1, (rect.right - rect.left) // 2)
+        click_y_abs = rect.top + max(1, (rect.bottom - rect.top) // 2)
+        rel_x = max(1, min(click_x_abs - top_rect.left, (top_rect.right - top_rect.left) - 2))
+        rel_y = max(1, min(click_y_abs - top_rect.top, (top_rect.bottom - top_rect.top) - 2))
+        bring_window_to_front(top_level, keep_topmost=False)
+        top_level.click_input(coords=(rel_x, rel_y))
+        time.sleep(settle_seconds)
+
     def _list_main_windows(self):
         from pywinauto import Desktop
 
@@ -963,6 +1350,22 @@ class AvidemuxOperator(SoftwareOperator):
         for window in Desktop(backend="uia").windows():
             if self._process_id(window) != process_id:
                 continue
+            if not self._is_visible(window):
+                continue
+            try:
+                rect = self._wrapper_rect(window)
+            except Exception:
+                continue
+            area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+            matches.append((rect.top, rect.left, -area, window))
+        matches.sort(key=lambda item: (item[0], item[1], item[2]))
+        return [item[-1] for item in matches]
+
+    def _iter_desktop_top_level_windows(self):
+        from pywinauto import Desktop
+
+        matches = []
+        for window in Desktop(backend="uia").windows():
             if not self._is_visible(window):
                 continue
             try:
@@ -1203,18 +1606,108 @@ class AvidemuxOperator(SoftwareOperator):
         return False
 
     def _find_export_progress_dialog(self, process_id: int | None, *, timeout: float = 2.0):
-        dialog = self._find_process_top_level_window(
-            process_id,
-            AVIDEMUX_PROGRESS_DIALOG_TITLE_PATTERNS,
-            timeout=timeout,
-        )
-        if dialog is not None:
-            return dialog
-        return self._find_process_top_level_window_by_content(
-            process_id,
-            AVIDEMUX_PROGRESS_DIALOG_CONTENT_PATTERNS,
-            timeout=timeout,
-        )
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            candidates = []
+            seen_tokens: set[object] = set()
+            search_sources = []
+            if process_id is not None:
+                search_sources.append((0, self._iter_process_top_level_windows(process_id)))
+            search_sources.append((1, self._iter_desktop_top_level_windows()))
+
+            for source_rank, windows in search_sources:
+                for window in windows:
+                    handle = getattr(window, "handle", None)
+                    token = (handle, id(window)) if handle is not None else id(window)
+                    if token in seen_tokens:
+                        continue
+                    seen_tokens.add(token)
+
+                    title = self._wrapper_text(window)
+                    title_matches = bool(title and self._matches_patterns(title, AVIDEMUX_PROGRESS_DIALOG_TITLE_PATTERNS))
+                    content_match = self._first_matching_text(window, AVIDEMUX_PROGRESS_DIALOG_CONTENT_PATTERNS)
+                    if not title_matches and not content_match:
+                        continue
+
+                    has_tray_action = False
+                    try:
+                        self._find_minimize_to_tray_control(window)
+                        has_tray_action = True
+                    except Exception:
+                        try:
+                            self._find_minimize_to_tray_geometry_candidate(window)
+                            has_tray_action = True
+                        except Exception:
+                            pass
+
+                    try:
+                        rect = self._wrapper_rect(window)
+                    except Exception:
+                        continue
+                    window_process_id = self._process_id(window)
+                    candidates.append(
+                        (
+                            0 if has_tray_action else 1,
+                            0 if process_id is not None and window_process_id == process_id else 1,
+                            0 if title_matches else 1,
+                            source_rank,
+                            rect.top,
+                            rect.left,
+                            window,
+                        )
+                    )
+
+            if candidates:
+                candidates.sort(key=lambda item: item[:6])
+                return candidates[0][6]
+            time.sleep(0.1)
+        return None
+
+    def _find_minimize_to_tray_control(self, dialog):
+        candidates = []
+        for wrapper in self._iter_wrapper_tree(dialog):
+            title = self._wrapper_text(wrapper)
+            if not title or not self._matches_patterns(title, AVIDEMUX_MINIMIZE_TO_TRAY_PATTERNS):
+                continue
+            control_type = self._wrapper_control_type(wrapper).lower()
+            if control_type and control_type not in {"button", "text", "pane", "custom", "group"}:
+                continue
+            rect = self._wrapper_rect(wrapper)
+            candidates.append(((rect.top, rect.left, -(rect.right - rect.left)), wrapper))
+        if not candidates:
+            raise AssertionError("Avidemux tray-minimize control was not exposed by text.")
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
+
+    def _find_minimize_to_tray_geometry_candidate(self, dialog):
+        dialog_rect = self._wrapper_rect(dialog)
+        dialog_width = max(1, dialog_rect.right - dialog_rect.left)
+        dialog_height = max(1, dialog_rect.bottom - dialog_rect.top)
+        bottom_threshold = dialog_rect.bottom - int(dialog_height * AVIDEMUX_TRAY_BUTTON_BOTTOM_REGION_RATIO)
+        left_threshold = dialog_rect.left + int(dialog_width * AVIDEMUX_TRAY_BUTTON_LEFT_REGION_RATIO)
+
+        candidates = []
+        for wrapper in self._iter_wrapper_tree(dialog):
+            control_type = self._wrapper_control_type(wrapper).lower()
+            if control_type and control_type not in {"button", "text", "pane", "custom", "group"}:
+                continue
+            rect = self._wrapper_rect(wrapper)
+            width = rect.right - rect.left
+            height = rect.bottom - rect.top
+            if width <= 0 or height <= 0:
+                continue
+            if rect.left >= left_threshold:
+                continue
+            if rect.top < bottom_threshold:
+                continue
+            if width > AVIDEMUX_TRAY_BUTTON_MAX_WIDTH or height > AVIDEMUX_TRAY_BUTTON_MAX_HEIGHT:
+                continue
+            area = width * height
+            candidates.append(((rect.top, rect.left, -area), wrapper))
+        if not candidates:
+            raise AssertionError("Avidemux tray-minimize geometry candidate was not found.")
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
 
     def _minimize_encode_dialog_to_tray(self, window, *, timeout: float = 2.0) -> bool:
         process_id = self._process_id(window) or self._active_process_id
@@ -1229,17 +1722,21 @@ class AvidemuxOperator(SoftwareOperator):
             pass
 
         try:
-            tray_button = find_text_control(
-                dialog,
-                AVIDEMUX_MINIMIZE_TO_TRAY_PATTERNS,
-                control_types=("Button",),
-            )
+            tray_button = self._find_minimize_to_tray_control(dialog)
         except Exception as exc:
-            logger.info("Avidemux tray-minimize button was not exposed: %s", exc)
-            return False
+            logger.info("Avidemux tray-minimize text control was not exposed: %s", exc)
+            try:
+                tray_button = self._find_minimize_to_tray_geometry_candidate(dialog)
+                logger.info(
+                    "Using a geometry-based fallback for the Avidemux tray-minimize control: %s",
+                    self._wrapper_text(tray_button) or "<untitled>",
+                )
+            except Exception as geometry_exc:
+                logger.info("Avidemux tray-minimize geometry fallback failed: %s", geometry_exc)
+                return False
 
         logger.info("Clicking the Avidemux tray-minimize button: %s", self._wrapper_text(tray_button) or "<untitled>")
-        click_control(tray_button, post_click_sleep=0.3)
+        self._click_wrapper_center(tray_button, settle_seconds=0.3)
         self._active_process_id = process_id
         self._encode_dialog_minimized_to_tray = True
         return True
@@ -1249,7 +1746,7 @@ class AvidemuxOperator(SoftwareOperator):
         logger.info("Validating Avidemux input and output paths.")
         assert input_video_path.exists(), f"Input video does not exist: {input_video_path}"
         assert output_video_path.parent.exists(), f"Output directory does not exist: {output_video_path.parent}"
-        assert output_video_path.suffix.lower() == ".mp4", f"Avidemux export target must be an mp4 file: {output_video_path}"
+        assert output_video_path.suffix.lower() == ".mkv", f"Avidemux export target must be an mkv file: {output_video_path}"
 
         window = self._connect_main_window(timeout=30.0)
         self._active_process_id = self._process_id(window)
@@ -1265,11 +1762,11 @@ class AvidemuxOperator(SoftwareOperator):
         logger.info("Selecting the Avidemux video codec.")
         self._select_main_combo_value(window, combo_index=0, target_text=AVIDEMUX_VIDEO_CODEC_TEXT)
         logger.info("Selecting the Avidemux output container.")
-        self._select_main_combo_value(window, combo_index=2, target_text=AVIDEMUX_MP4_MUXER_TEXT)
+        self._select_main_combo_value(window, combo_index=2, target_text=AVIDEMUX_MUXER_TEXT)
 
         logger.info("Saving the encoded Avidemux output.")
-        self._save_output(window, input_video_path, output_video_path)
-        if not self._minimize_encode_dialog_to_tray(window):
+        minimized_to_tray = self._save_output(window, input_video_path, output_video_path)
+        if not minimized_to_tray:
             self._begin_background_wait(window, phase="encode")
         logger.info("Waiting for the Avidemux encode to finish.")
         self._wait_for_export_completion(output_video_path)
@@ -1565,7 +2062,7 @@ class AvidemuxOperator(SoftwareOperator):
             time.sleep(0.2)
         raise AssertionError(f"Avidemux combo selection did not settle to '{target_text}'. Last value: '{selected_text}'.")
 
-    def _save_output(self, window, input_video_path: Path, output_video_path: Path) -> None:
+    def _save_output(self, window, input_video_path: Path, output_video_path: Path) -> bool:
         bring_window_to_front(window, keep_topmost=False)
         send_hotkey("^s")
         time.sleep(AVIDEMUX_DIALOG_SETTLE_SECONDS)
@@ -1586,7 +2083,13 @@ class AvidemuxOperator(SoftwareOperator):
         while time.monotonic() < deadline:
             if output_video_path.exists() and output_video_path.stat().st_size > 0:
                 logger.info("Avidemux started writing the output file: %s", output_video_path)
-                return
+                logger.info("Trying to minimize Avidemux to tray immediately after export output starts.")
+                minimized_to_tray = self._minimize_encode_dialog_to_tray(window, timeout=5.0)
+                if minimized_to_tray:
+                    logger.info("Avidemux was minimized to tray after export output started.")
+                else:
+                    logger.info("Avidemux tray minimization was not available immediately after export output started.")
+                return minimized_to_tray
             time.sleep(0.5)
         raise AssertionError(f"Avidemux did not start writing the requested output: {output_video_path}")
 
@@ -1667,8 +2170,8 @@ class AvidemuxOperator(SoftwareOperator):
 
         stable_rounds = 0
         last_size = -1
-        last_reported_size = -1
         deadline = time.monotonic() + AVIDEMUX_EXPORT_TIMEOUT_SECONDS
+        progress_logger = _WaitProgressLogger("Avidemux export")
         while time.monotonic() < deadline:
             if window is None:
                 try:
@@ -1683,26 +2186,24 @@ class AvidemuxOperator(SoftwareOperator):
                 except Exception as exc:
                     logger.info("Ignoring an Avidemux completion-dialog probe failure: %s", exc)
             current_size = output_video_path.stat().st_size if output_video_path.exists() else 0
-            if current_size != last_reported_size:
-                logger.info(
-                    "Avidemux export progress. output=%s size_bytes=%d stable_rounds=%d",
-                    output_video_path,
-                    current_size,
-                    stable_rounds,
-                )
-                last_reported_size = current_size
             if current_size > 0 and current_size == last_size:
                 stable_rounds += 1
             else:
                 stable_rounds = 0
             last_size = current_size
+            progress_logger.maybe_log(
+                detail=(
+                    f"output={output_video_path.name} size_bytes={current_size} "
+                    f"stable_rounds={stable_rounds}"
+                )
+            )
             if current_size > 0 and stable_rounds >= AVIDEMUX_EXPORT_STABLE_ROUNDS:
                 if window is not None:
                     try:
                         self._dismiss_export_success_dialog_if_present(window, output_video_path, timeout=0.1)
                     except Exception as exc:
                         logger.info("Ignoring a final Avidemux completion-dialog dismissal failure: %s", exc)
-                logger.info("Avidemux export completion conditions satisfied.")
+                logger.info("Avidemux export completion conditions satisfied. elapsed=%s", progress_logger.elapsed_text())
                 break
             time.sleep(AVIDEMUX_EXPORT_POLL_SECONDS)
         else:
@@ -1764,6 +2265,22 @@ class HandBrakeOperator(SoftwareOperator):
         from pywinauto import Desktop
 
         for window in Desktop(backend="uia").windows():
+            yield window
+            for child in window.descendants():
+                yield child
+
+    def _iter_process_wrappers(self, process_id: int | None):
+        if not process_id:
+            return
+        from pywinauto import Desktop
+
+        for window in Desktop(backend="uia").windows():
+            try:
+                wrapper_process_id = int(getattr(getattr(window, "element_info", None), "process_id", 0) or 0)
+            except Exception:
+                continue
+            if wrapper_process_id != process_id:
+                continue
             yield window
             for child in window.descendants():
                 yield child
@@ -1981,6 +2498,56 @@ class HandBrakeOperator(SoftwareOperator):
         candidates.sort(key=lambda item: item[:4])
         return candidates[0][4]
 
+    def _find_labeled_row_control(
+        self,
+        window,
+        label_patterns: tuple[str, ...],
+        *,
+        allowed_types: tuple[str, ...],
+    ):
+        labels = self._find_matching_wrappers(
+            window,
+            label_patterns,
+            control_types=("Text", "Pane", "Group", "Document", "Custom"),
+        )
+        allowed_type_set = {value.lower() for value in allowed_types}
+        candidates = []
+        for label in labels:
+            label_rect = self._wrapper_rect(label)
+            label_text = self._normalized_ui_text(self._wrapper_text(label))
+            for wrapper in self._iter_wrapper_tree(window):
+                control_type = self._wrapper_control_type(wrapper).lower()
+                if control_type not in allowed_type_set:
+                    continue
+                rect = self._wrapper_rect(wrapper)
+                if rect.left <= label_rect.right:
+                    continue
+                overlap = self._vertical_overlap(label_rect, rect)
+                if overlap <= 0:
+                    continue
+                width = rect.right - rect.left
+                if width <= 0:
+                    continue
+                current_text = self._selector_selected_text(wrapper)
+                normalized_text = self._normalized_ui_text(current_text)
+                if normalized_text and normalized_text == label_text:
+                    continue
+                candidates.append(
+                    (
+                        0 if self._looks_like_preset_value(current_text) else 1,
+                        abs(((rect.top + rect.bottom) // 2) - ((label_rect.top + label_rect.bottom) // 2)),
+                        rect.left - label_rect.right,
+                        -width,
+                        rect.top,
+                        current_text,
+                        wrapper,
+                    )
+                )
+        if not candidates:
+            raise AssertionError(f"HandBrake did not expose a row control near label patterns {label_patterns}.")
+        candidates.sort(key=lambda item: item[:5])
+        return candidates[0][6]
+
     def _normalized_ui_text(self, text: str) -> str:
         return re.sub(r"\s+", " ", text).strip().casefold()
 
@@ -2001,6 +2568,9 @@ class HandBrakeOperator(SoftwareOperator):
                 return value.strip()
         return ""
 
+    def _selector_selected_text(self, wrapper) -> str:
+        return self._combo_selected_text(wrapper) or self._read_control_value(wrapper) or self._wrapper_text(wrapper)
+
     def _text_matches_target(self, text: str, target_text: str) -> bool:
         normalized_text = self._normalized_ui_text(text)
         normalized_target = self._normalized_ui_text(target_text)
@@ -2008,14 +2578,54 @@ class HandBrakeOperator(SoftwareOperator):
             return False
         return normalized_text == normalized_target or normalized_target in normalized_text
 
+    def _looks_like_preset_value(self, text: str) -> bool:
+        normalized_text = self._normalized_ui_text(text)
+        if not normalized_text:
+            return False
+        return any(hint in normalized_text for hint in HAND_BRAKE_PRESET_VALUE_HINTS)
+
+    def _looks_like_title_selector_value(self, text: str) -> bool:
+        normalized_text = self._normalized_ui_text(text)
+        if not normalized_text:
+            return False
+        return bool(re.match(HAND_BRAKE_TITLE_SELECTOR_VALUE_RE, normalized_text))
+
+    def _set_combo_text_with_keyboard(self, window, combo, target_text: str) -> None:
+        logger.info("Trying a keyboard-entry fallback for the HandBrake preset combo: %s", target_text)
+        bring_window_to_front(window, keep_topmost=False)
+        try:
+            combo.click_input()
+        except Exception:
+            pass
+        time.sleep(0.2)
+        paste_text_via_clipboard(target_text, replace_existing=True)
+        time.sleep(0.2)
+        send_hotkey("{ENTER}")
+        time.sleep(HAND_BRAKE_DIALOG_SETTLE_SECONDS)
+
     def _preset_combo(self, window):
+        try:
+            selector = self._find_labeled_row_control(
+                window,
+                HAND_BRAKE_PRESET_LABEL_PATTERNS,
+                allowed_types=("Button", "ComboBox", "Edit", "Pane", "Custom", "Group"),
+            )
+            logger.info(
+                "Resolved the HandBrake preset selector from the labeled row. type=%s text=%s",
+                self._wrapper_control_type(selector) or "<unknown>",
+                self._selector_selected_text(selector) or "<empty>",
+            )
+            return selector
+        except AssertionError:
+            pass
+
         try:
             return self._find_labeled_combo(window, HAND_BRAKE_PRESET_LABEL_PATTERNS)
         except AssertionError:
             pass
 
         window_rect = self._wrapper_rect(window)
-        _, window_height = self._window_dimensions(window)
+        window_width, window_height = self._window_dimensions(window)
         candidates = []
         for wrapper in self._iter_wrapper_tree(window):
             if self._wrapper_control_type(wrapper).lower() != "combobox":
@@ -2025,76 +2635,102 @@ class HandBrakeOperator(SoftwareOperator):
             if width <= 0:
                 continue
             relative_top = (rect.top - window_rect.top) / window_height
-            current_text = self._combo_selected_text(wrapper)
+            relative_left = (rect.left - window_rect.left) / window_width
+            current_text = self._selector_selected_text(wrapper)
             candidates.append(
                 (
+                    0 if self._looks_like_preset_value(current_text) else 1,
+                    1 if self._looks_like_title_selector_value(current_text) else 0,
                     0 if relative_top <= 0.35 else 1,
+                    0 if relative_left <= 0.55 else 1,
                     0 if current_text else 1,
                     relative_top,
                     -width,
                     rect.left,
+                    current_text,
                     wrapper,
                 )
             )
         assert candidates, "HandBrake did not expose a preset combo box."
-        candidates.sort(key=lambda item: item[:5])
-        return candidates[0][5]
+        candidates.sort(key=lambda item: item[:8])
+        logger.info(
+            "HandBrake preset combo fallback candidates: %s",
+            [
+                {
+                    "text": candidate[8] or "<empty>",
+                    "top_bias": candidate[2],
+                    "left_bias": candidate[3],
+                    "looks_like_preset": candidate[0] == 0,
+                    "looks_like_title_selector": candidate[1] == 1,
+                }
+                for candidate in candidates[:5]
+            ],
+        )
+        return candidates[0][9]
 
-    def _find_combo_dropdown_item(self, window, combo, target_text: str):
+    def _find_combo_dropdown_item(self, window, combo, target_text: str, *, timeout: float = 3.0):
         owner_process_id = getattr(getattr(window, "element_info", None), "process_id", None)
         combo_rect = self._wrapper_rect(combo)
         allowed_types_by_pass = (
-            {"listitem", "dataitem", "treeitem"},
-            {"text", "listitem", "dataitem", "treeitem"},
+            {"listitem", "dataitem", "treeitem", "button", "custom"},
+            {"text", "listitem", "dataitem", "treeitem", "button", "custom", "pane", "group"},
         )
 
-        for allowed_types in allowed_types_by_pass:
-            candidates = []
-            seen_handles: set[tuple[object, int]] = set()
-            for source_rank, wrappers in enumerate((self._iter_wrapper_tree(window), self._iter_desktop_wrappers())):
-                for wrapper in wrappers:
-                    handle = getattr(wrapper, "handle", None)
-                    seen_key = (handle, source_rank)
-                    if seen_key in seen_handles:
-                        continue
-                    seen_handles.add(seen_key)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for allowed_types in allowed_types_by_pass:
+                candidates = []
+                seen_keys: set[tuple[object, int]] = set()
+                search_sources = [self._iter_wrapper_tree(window)]
+                if owner_process_id:
+                    search_sources.append(self._iter_process_wrappers(int(owner_process_id)))
+                for source_rank, wrappers in enumerate(search_sources):
+                    for wrapper in wrappers:
+                        handle = getattr(wrapper, "handle", None)
+                        dedupe_token = handle if handle is not None else id(wrapper)
+                        seen_key = (dedupe_token, source_rank)
+                        if seen_key in seen_keys:
+                            continue
+                        seen_keys.add(seen_key)
 
-                    control_type = self._wrapper_control_type(wrapper).lower()
-                    if control_type not in allowed_types:
-                        continue
+                        control_type = self._wrapper_control_type(wrapper).lower()
+                        if control_type not in allowed_types:
+                            continue
 
-                    text = self._read_control_value(wrapper) or self._wrapper_text(wrapper)
-                    if not self._text_matches_target(text, target_text):
-                        continue
+                        text = self._read_control_value(wrapper) or self._wrapper_text(wrapper)
+                        if not self._text_matches_target(text, target_text):
+                            continue
 
-                    rect = self._wrapper_rect(wrapper)
-                    area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
-                    wrapper_process_id = getattr(getattr(wrapper, "element_info", None), "process_id", None)
-                    candidates.append(
-                        (
-                            0 if owner_process_id and wrapper_process_id == owner_process_id else 1,
-                            0 if rect.top >= combo_rect.top - 20 else 1,
-                            abs(rect.top - combo_rect.bottom),
-                            abs(rect.left - combo_rect.left),
-                            source_rank,
-                            -area,
-                            wrapper,
+                        rect = self._wrapper_rect(wrapper)
+                        area = max(0, rect.right - rect.left) * max(0, rect.bottom - rect.top)
+                        wrapper_process_id = getattr(getattr(wrapper, "element_info", None), "process_id", None)
+                        candidates.append(
+                            (
+                                0 if owner_process_id and wrapper_process_id == owner_process_id else 1,
+                                0 if rect.top >= combo_rect.top - 20 else 1,
+                                abs(rect.top - combo_rect.bottom),
+                                abs(rect.left - combo_rect.left),
+                                source_rank,
+                                -area,
+                                wrapper,
+                            )
                         )
-                    )
-            if candidates:
-                candidates.sort(key=lambda item: item[:6])
-                return candidates[0][6]
+                if candidates:
+                    candidates.sort(key=lambda item: item[:6])
+                    return candidates[0][6]
+            time.sleep(0.1)
         raise AssertionError(f"HandBrake did not expose the preset item '{target_text}'.")
 
     def _select_combo_value(self, window, combo, target_text: str) -> None:
-        current_text = self._combo_selected_text(combo)
+        current_text = self._selector_selected_text(combo)
         if self._text_matches_target(current_text, target_text):
             return
 
+        selected_via_dropdown_item = False
         try:
             combo.select(target_text)
             time.sleep(HAND_BRAKE_DIALOG_SETTLE_SECONDS)
-            current_text = self._combo_selected_text(combo)
+            current_text = self._selector_selected_text(combo)
             if self._text_matches_target(current_text, target_text):
                 return
         except Exception:
@@ -2104,16 +2740,27 @@ class HandBrakeOperator(SoftwareOperator):
         combo.click_input()
         time.sleep(0.3)
 
-        dropdown_item = self._find_combo_dropdown_item(window, combo, target_text)
-        logger.info("Selecting the HandBrake combo item: %s", self._wrapper_text(dropdown_item) or target_text)
-        dropdown_item.click_input()
-        time.sleep(HAND_BRAKE_DIALOG_SETTLE_SECONDS)
+        try:
+            dropdown_item = self._find_combo_dropdown_item(window, combo, target_text)
+            logger.info("Selecting the HandBrake combo item: %s", self._wrapper_text(dropdown_item) or target_text)
+            dropdown_item.click_input()
+            selected_via_dropdown_item = True
+            time.sleep(HAND_BRAKE_DIALOG_SETTLE_SECONDS)
+        except AssertionError as exc:
+            logger.info("HandBrake preset dropdown item lookup failed. Falling back to keyboard entry: %s", exc)
+            self._set_combo_text_with_keyboard(window, combo, target_text)
 
         deadline = time.monotonic() + HAND_BRAKE_PRESET_SELECTION_TIMEOUT_SECONDS
-        last_selected_text = self._combo_selected_text(combo)
+        last_selected_text = self._selector_selected_text(combo)
         while time.monotonic() < deadline:
-            last_selected_text = self._combo_selected_text(combo)
+            last_selected_text = self._selector_selected_text(combo)
             if self._text_matches_target(last_selected_text, target_text):
+                return
+            if selected_via_dropdown_item and not last_selected_text:
+                logger.info(
+                    "HandBrake selector text stayed empty after clicking the target preset item. "
+                    "Assuming the preset selection succeeded based on the dropdown click."
+                )
                 return
             time.sleep(0.2)
         raise AssertionError(
@@ -2125,10 +2772,13 @@ class HandBrakeOperator(SoftwareOperator):
         preset_combo = self._preset_combo(window)
         logger.info("Opening the HandBrake preset combo.")
         self._select_combo_value(window, preset_combo, target_text)
-        selected_text = self._combo_selected_text(preset_combo)
-        assert self._text_matches_target(selected_text, target_text), (
-            f"HandBrake preset selection did not settle to '{target_text}'. Last value: '{selected_text or '<empty>'}'."
-        )
+        selected_text = self._selector_selected_text(preset_combo)
+        if selected_text:
+            assert self._text_matches_target(selected_text, target_text), (
+                f"HandBrake preset selection did not settle to '{target_text}'. Last value: '{selected_text or '<empty>'}'."
+            )
+        else:
+            logger.info("HandBrake preset selector does not expose a readable selected-text value after selection.")
 
     def _save_path_edit(self, window):
         window_rect = self._wrapper_rect(window)
@@ -2489,8 +3139,8 @@ class HandBrakeOperator(SoftwareOperator):
 
         stable_rounds = 0
         last_size = -1
-        last_reported_status = None
         deadline = time.monotonic() + HAND_BRAKE_EXPORT_TIMEOUT_SECONDS
+        progress_logger = _WaitProgressLogger("HandBrake encode")
         while time.monotonic() < deadline:
             if window is None:
                 window = self._connect_main_window(timeout=2.0)
@@ -2508,26 +3158,15 @@ class HandBrakeOperator(SoftwareOperator):
             else:
                 stable_rounds = 0
             last_size = current_size
-
-            status = (
-                current_size,
-                stable_rounds,
-                active_status or "<idle>",
-                ready_status or "<not-ready>",
-            )
-            if status != last_reported_status:
-                logger.info(
-                    "HandBrake export state. output=%s size_bytes=%d stable_rounds=%d active_status=%s ready_status=%s",
-                    output_video_path,
-                    current_size,
-                    stable_rounds,
-                    active_status or "<idle>",
-                    ready_status or "<not-ready>",
+            progress_logger.maybe_log(
+                detail=(
+                    f"output={output_video_path.name} size_bytes={current_size} stable_rounds={stable_rounds} "
+                    f"active_status={active_status or '<idle>'} ready_status={ready_status or '<not-ready>'}"
                 )
-                last_reported_status = status
+            )
 
             if current_size > 0 and not active_status and stable_rounds >= HAND_BRAKE_EXPORT_STABLE_ROUNDS:
-                logger.info("HandBrake export completion conditions satisfied.")
+                logger.info("HandBrake export completion conditions satisfied. elapsed=%s", progress_logger.elapsed_text())
                 break
             time.sleep(HAND_BRAKE_EXPORT_POLL_SECONDS)
         else:
@@ -3366,12 +4005,14 @@ class ShutterEncoderOperator(SoftwareOperator):
         logger.info("Deleting the intermediate Shutter Encoder generated file from the source folder: %s", generated_output)
         generated_output.unlink()
 
-    def _function_picker_is_h264(self, window) -> bool:
+    def _function_picker_is_target(self, window, target_text: str = SHUTTER_ENCODER_TARGET_FUNCTION_TEXT) -> bool:
         try:
             current_value = self._read_function_picker_value(window)
         except Exception:
             return False
-        return self._matches_patterns(current_value, SHUTTER_ENCODER_H264_PATTERNS)
+        normalized_current = re.sub(r"\s+", " ", current_value).strip().casefold()
+        normalized_target = re.sub(r"\s+", " ", target_text).strip().casefold()
+        return bool(normalized_current and normalized_current == normalized_target)
 
     def _open_input_dialog(self, window) -> None:
         self._dismiss_update_dialog_if_present(timeout=1.0)
@@ -3452,6 +4093,7 @@ class ShutterEncoderOperator(SoftwareOperator):
     def _select_function(self, window, function_name: str) -> None:
         window = self._connect_main_window(timeout=SHUTTER_ENCODER_CONTROL_TIMEOUT_SECONDS)
         bring_window_to_front(window, keep_topmost=False)
+        normalized_target = re.sub(r"\s+", " ", function_name).strip().casefold()
         try:
             picker = self._find_function_picker(window)
         except Exception as exc:
@@ -3460,8 +4102,9 @@ class ShutterEncoderOperator(SoftwareOperator):
 
         if picker is not None:
             current_value = self._read_control_value(picker) or self._wrapper_text(picker)
-            if current_value and self._matches_patterns(current_value, SHUTTER_ENCODER_H264_PATTERNS):
-                logger.info("Shutter Encoder already shows H.264 in the function picker. Skipping extra typing.")
+            normalized_current = re.sub(r"\s+", " ", current_value).strip().casefold()
+            if normalized_current and normalized_current == normalized_target:
+                logger.info("Shutter Encoder already shows %s in the function picker. Skipping extra typing.", function_name)
                 return
             logger.info("Focusing the Shutter Encoder function picker.")
             self._click_wrapper_center(picker)
@@ -3475,7 +4118,7 @@ class ShutterEncoderOperator(SoftwareOperator):
             )
 
         self._type_into_focused_control(
-            "H.264",
+            function_name,
             replace_existing=True,
             commit_with_enter=True,
             prefer_clipboard=True,
@@ -3493,8 +4136,9 @@ class ShutterEncoderOperator(SoftwareOperator):
             if current_value != last_value:
                 logger.info("Shutter Encoder function picker state. current_value=%s", current_value or "<empty>")
                 last_value = current_value
-            if current_value and self._matches_patterns(current_value, SHUTTER_ENCODER_H264_PATTERNS):
-                logger.info("Verified that Shutter Encoder shows H.264 as the selected function.")
+            normalized_current = re.sub(r"\s+", " ", current_value).strip().casefold()
+            if normalized_current and normalized_current == normalized_target:
+                logger.info("Verified that Shutter Encoder shows %s as the selected function.", function_name)
                 return
             if not current_value:
                 try:
@@ -3504,12 +4148,16 @@ class ShutterEncoderOperator(SoftwareOperator):
                     logger.info("Shutter Encoder function picker clipboard readback failed: %s", exc)
                 if clipboard_value != last_clipboard_value:
                     last_clipboard_value = clipboard_value
-                if clipboard_value and self._matches_patterns(clipboard_value, SHUTTER_ENCODER_H264_PATTERNS):
-                    logger.info("Verified that Shutter Encoder shows H.264 as the selected function through clipboard readback.")
+                normalized_clipboard = re.sub(r"\s+", " ", clipboard_value).strip().casefold()
+                if normalized_clipboard and normalized_clipboard == normalized_target:
+                    logger.info(
+                        "Verified that Shutter Encoder shows %s as the selected function through clipboard readback.",
+                        function_name,
+                    )
                     return
             time.sleep(0.2)
 
-        raise AssertionError("Shutter Encoder did not settle to H.264 before Start function was allowed.")
+        raise AssertionError(f"Shutter Encoder did not settle to {function_name} before Start function was allowed.")
 
     def _start_function(self, window) -> None:
         window = self._connect_main_window(timeout=SHUTTER_ENCODER_CONTROL_TIMEOUT_SECONDS)
@@ -3581,25 +4229,20 @@ class ShutterEncoderOperator(SoftwareOperator):
     ) -> None:
         logger.info("Waiting for the Shutter Encoder job to actually start. timeout=%.1fs", timeout)
         deadline = time.monotonic() + timeout
-        last_status = None
+        progress_logger = _WaitProgressLogger("Shutter Encoder start")
         while time.monotonic() < deadline:
             window = self._connect_main_window(timeout=2.0)
             progress_ratio = self._read_progress_ratio(window)
             output_candidate = self._resolve_output_candidate(input_video_path, known_outputs)
             started = (progress_ratio is not None and progress_ratio > 0.0) or output_candidate is not None
-            status = (
-                None if progress_ratio is None else round(progress_ratio, 3),
-                None if output_candidate is None else output_candidate.name,
-            )
-            if status != last_status:
-                logger.info(
-                    "Shutter Encoder start state. progress_ratio=%s output_candidate=%s",
-                    "n/a" if progress_ratio is None else f"{progress_ratio:.3f}",
-                    "<none>" if output_candidate is None else output_candidate.name,
+            progress_logger.maybe_log(
+                detail=(
+                    f"progress_ratio={'n/a' if progress_ratio is None else f'{progress_ratio:.3f}'} "
+                    f"output_candidate={'<none>' if output_candidate is None else output_candidate.name}"
                 )
-                last_status = status
+            )
             if started:
-                logger.info("Shutter Encoder start conditions satisfied.")
+                logger.info("Shutter Encoder start conditions satisfied. elapsed=%s", progress_logger.elapsed_text())
                 return
             time.sleep(0.5)
         raise AssertionError("Shutter Encoder did not start the job after the start trigger.")
@@ -3608,8 +4251,8 @@ class ShutterEncoderOperator(SoftwareOperator):
         completion_rounds = 0
         output_stable_rounds = 0
         last_output_signature = None
-        last_status = None
         deadline = time.monotonic() + SHUTTER_ENCODER_PROGRESS_TIMEOUT_SECONDS
+        progress_logger = _WaitProgressLogger("Shutter Encoder transcode")
         while time.monotonic() < deadline:
             window = self._connect_main_window(timeout=2.0)
             complete_text = self._control_present(
@@ -3635,24 +4278,13 @@ class ShutterEncoderOperator(SoftwareOperator):
             else:
                 output_stable_rounds = 0
                 last_output_signature = None
-
-            status = (
-                complete_text,
-                percent_complete,
-                None if progress_ratio is None else round(progress_ratio, 3),
-                None if output_candidate is None else output_candidate.name,
-                output_stable_rounds,
-            )
-            if status != last_status:
-                logger.info(
-                    "Shutter Encoder progress state. completed_text=%s percent_complete=%s progress_ratio=%s output_candidate=%s output_stable_rounds=%d",
-                    complete_text,
-                    percent_complete,
-                    "n/a" if progress_ratio is None else f"{progress_ratio:.3f}",
-                    "<none>" if output_candidate is None else output_candidate.name,
-                    output_stable_rounds,
+            progress_logger.maybe_log(
+                detail=(
+                    f"progress_ratio={'n/a' if progress_ratio is None else f'{progress_ratio:.3f}'} "
+                    f"output_candidate={'<none>' if output_candidate is None else output_candidate.name} "
+                    f"output_stable_rounds={output_stable_rounds}"
                 )
-                last_status = status
+            )
 
             has_uia_progress_signal = complete_text or percent_complete or progress_ratio is not None
             progress_complete = percent_complete or (progress_ratio is not None and progress_ratio >= 0.999)
@@ -3662,7 +4294,11 @@ class ShutterEncoderOperator(SoftwareOperator):
                 completion_rounds = 0
 
             if completion_rounds >= SHUTTER_ENCODER_PROGRESS_IDLE_ROUNDS and output_candidate is not None and output_stable_rounds >= 1:
-                logger.info("Shutter Encoder completion conditions satisfied. generated_output=%s", output_candidate)
+                logger.info(
+                    "Shutter Encoder completion conditions satisfied. elapsed=%s generated_output=%s",
+                    progress_logger.elapsed_text(),
+                    output_candidate,
+                )
                 return output_candidate
 
             if (
@@ -3672,7 +4308,8 @@ class ShutterEncoderOperator(SoftwareOperator):
             ):
                 logger.info(
                     "Shutter Encoder progress UI is not exposed through UIA. "
-                    "Treating a stable generated output as completion. generated_output=%s",
+                    "Treating a stable generated output as completion. elapsed=%s generated_output=%s",
+                    progress_logger.elapsed_text(),
                     output_candidate,
                 )
                 return output_candidate
@@ -3814,8 +4451,12 @@ class ShutterEncoderOperator(SoftwareOperator):
         logger.info("Validating the imported source is visible in Shutter Encoder.")
         self._wait_for_imported_source(window, input_video_path)
 
-        logger.info("Selecting H.264 in Shutter Encoder by writing 'H.264' into the function picker and confirming with Enter.")
-        self._select_function(window, "H")
+        logger.info(
+            "Selecting %s in Shutter Encoder by writing '%s' into the function picker and confirming with Enter.",
+            SHUTTER_ENCODER_TARGET_FUNCTION_TEXT,
+            SHUTTER_ENCODER_TARGET_FUNCTION_TEXT,
+        )
+        self._select_function(window, SHUTTER_ENCODER_TARGET_FUNCTION_TEXT)
         logger.info("Starting the Shutter Encoder transcode.")
         self._start_function(window)
         self._begin_background_wait(
@@ -3860,61 +4501,16 @@ class KdenliveOperator(SoftwareOperator):
             window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
             self._main_window = window
         bring_window_to_front(window, keep_topmost=False)
-
-        logger.info("Opening Kdenlive import command.")
-        self._open_import_dialog(window)
-        logger.info("Filling Kdenlive file picker.")
-        fill_file_dialog(
-            input_video_path,
-            dialog_patterns=KDENLIVE_OPEN_DIALOG_PATTERNS,
-            confirm_patterns=KDENLIVE_OPEN_CONFIRM_PATTERNS,
-            timeout=KDENLIVE_DIALOG_TIMEOUT_SECONDS,
-            must_exist=True,
-        )
-        time.sleep(KDENLIVE_IMPORT_SETTLE_SECONDS)
-
-        logger.info("Reconnecting to Kdenlive after import.")
-        window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
-        self._main_window = window
-        bring_window_to_front(window, keep_topmost=False)
-
-        logger.info("Waiting for imported clip in Sequences.")
-        clip_item = self._wait_for_imported_clip(window, input_video_path)
-        logger.info("Selecting imported clip.")
-        click_control(clip_item, post_click_sleep=KDENLIVE_POST_ACTION_SLEEP_SECONDS)
-
+        window = self._open_input_clip(window, input_video_path)
         logger.info("Inserting selected clip into timeline.")
         self._insert_clip_to_timeline(window)
-        logger.info("Opening Kdenlive rendering dialog.")
-        render_dialog = self._open_render_dialog(window)
-        logger.info("Setting render output path.")
-        self._set_render_output_path(render_dialog, output_video_path)
-        self._show_job_queue_tab(render_dialog)
-        logger.info("Starting Kdenlive render.")
-        self._start_render(render_dialog)
-        self._begin_background_wait(render_dialog, phase="render")
-        logger.info("Waiting for Kdenlive render completion.")
-        self._wait_for_render_completion(render_dialog, output_video_path)
+        self._render_current_timeline(window, output_video_path)
         self.close()
 
     def close(self) -> None:
         logger.info("Closing Kdenlive render dialog and main window.")
         if self._render_dialog is not None:
-            try:
-                bring_window_to_front(self._render_dialog, keep_topmost=False)
-                close_button = find_text_control(self._render_dialog, KDENLIVE_CLOSE_BUTTON_PATTERNS, control_types=("Button",))
-                click_control(close_button, post_click_sleep=0.5)
-            except Exception:
-                try:
-                    self._render_dialog.close()
-                except Exception:
-                    pass
-            try:
-                logger.info("Handling any Kdenlive save-confirmation dialog triggered by closing the render window.")
-                dismiss_close_prompts(timeout=1.5, owner_window=self._main_window or self._render_dialog)
-            except Exception:
-                logger.exception("Could not dismiss Kdenlive save-confirmation dialog after closing the render window.")
-            self._render_dialog = None
+            self._close_render_dialog_only()
         if self._main_window is not None:
             self._dismiss_profile_switch_prompt_if_present(self._main_window)
             try:
@@ -3945,6 +4541,86 @@ class KdenliveOperator(SoftwareOperator):
             self._main_window = None
             return
         super().close()
+
+    def _close_render_dialog_only(self) -> None:
+        if self._render_dialog is None:
+            return
+        logger.info("Closing the Kdenlive render dialog while keeping the main window open.")
+        render_dialog = self._render_dialog
+        try:
+            bring_window_to_front(render_dialog, keep_topmost=False)
+            close_button = find_text_control(render_dialog, KDENLIVE_CLOSE_BUTTON_PATTERNS, control_types=("Button",))
+            click_control(close_button, post_click_sleep=0.5)
+        except Exception:
+            try:
+                render_dialog.close()
+            except Exception:
+                pass
+        try:
+            logger.info("Handling any Kdenlive save-confirmation dialog triggered by closing the render window.")
+            self._dismiss_kdenlive_save_dialog_if_present(self._main_window or render_dialog, timeout=2.0)
+            dismiss_close_prompts(timeout=1.5, owner_window=self._main_window or render_dialog)
+            self._dismiss_kdenlive_save_dialog_if_present(self._main_window or render_dialog, timeout=1.0)
+        except Exception:
+            logger.exception("Could not dismiss Kdenlive save-confirmation dialog after closing the render window.")
+        self._render_dialog = None
+        if self._main_window is not None:
+            try:
+                self._main_window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
+            except Exception:
+                pass
+
+    def _open_input_clip(self, window, input_video_path: Path):
+        if self._dismiss_kdenlive_save_dialog_if_present(window, timeout=1.0):
+            logger.info("Kdenlive save-confirmation dialog was blocking the next import. Reconnecting to the main window.")
+            try:
+                window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
+                self._main_window = window
+                bring_window_to_front(window, keep_topmost=False)
+            except Exception:
+                pass
+        logger.info("Opening Kdenlive import command.")
+        self._open_import_dialog(window)
+        logger.info("Filling Kdenlive file picker.")
+        fill_file_dialog(
+            input_video_path,
+            dialog_patterns=KDENLIVE_OPEN_DIALOG_PATTERNS,
+            confirm_patterns=KDENLIVE_OPEN_CONFIRM_PATTERNS,
+            timeout=KDENLIVE_DIALOG_TIMEOUT_SECONDS,
+            must_exist=True,
+        )
+        time.sleep(KDENLIVE_IMPORT_SETTLE_SECONDS)
+
+        logger.info("Reconnecting to Kdenlive after import.")
+        window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
+        self._main_window = window
+        bring_window_to_front(window, keep_topmost=False)
+
+        logger.info("Waiting for imported clip in Sequences.")
+        clip_item = self._wait_for_imported_clip(window, input_video_path)
+        logger.info("Selecting imported clip.")
+        click_control(clip_item, post_click_sleep=KDENLIVE_POST_ACTION_SLEEP_SECONDS)
+        return window
+
+    def _render_current_timeline(self, window, output_video_path: Path):
+        logger.info("Opening Kdenlive rendering dialog.")
+        render_dialog = self._open_render_dialog(window)
+        logger.info("Setting render output path.")
+        self._set_render_output_path(render_dialog, output_video_path)
+        self._show_job_queue_tab(render_dialog)
+        logger.info("Starting Kdenlive render.")
+        self._start_render(render_dialog)
+        self._begin_background_wait(
+            render_dialog,
+            phase="render",
+            start_waiter=lambda: self._confirm_render_transition_after_minimizing(render_dialog),
+            start_description="the Kdenlive render transition",
+        )
+        logger.info("Waiting for Kdenlive render completion.")
+        self._wait_for_render_completion(render_dialog, output_video_path)
+        if self._main_window is None:
+            self._main_window = window
+        return self._main_window
 
     def _process_id(self, window) -> int | None:
         try:
@@ -4002,22 +4678,45 @@ class KdenliveOperator(SoftwareOperator):
 
     def _dismiss_kdenlive_save_dialog_if_present(self, owner_window, *, timeout: float = 3.0) -> bool:
         process_id = self._process_id(owner_window)
-        owner_handle = getattr(owner_window, "handle", None)
         deadline = time.monotonic() + timeout
+        search_roots = [owner_window]
+        try:
+            top_level_owner = owner_window.top_level_parent()
+        except Exception:
+            top_level_owner = owner_window
+        if getattr(top_level_owner, "handle", None) != getattr(owner_window, "handle", None):
+            search_roots.append(top_level_owner)
+        for candidate in self._iter_process_top_level_windows(process_id):
+            if getattr(candidate, "handle", None) in {
+                getattr(root, "handle", None)
+                for root in search_roots
+            }:
+                continue
+            search_roots.append(candidate)
         dismissed = False
         while time.monotonic() < deadline:
             dialog = None
-            for candidate in self._iter_process_top_level_windows(process_id):
-                if owner_handle is not None and getattr(candidate, "handle", None) == owner_handle:
-                    continue
-                if not self._dialog_matches(
-                    candidate,
-                    title_patterns=KDENLIVE_WARNING_DIALOG_PATTERNS,
-                    text_patterns=KDENLIVE_SAVE_CHANGES_TEXT_PATTERNS,
-                ):
-                    continue
-                dialog = candidate
-                break
+            for root in search_roots:
+                for candidate in self._iter_wrapper_tree(root):
+                    if getattr(candidate, "handle", None) == getattr(owner_window, "handle", None):
+                        continue
+                    if not self._dialog_matches(
+                        candidate,
+                        title_patterns=KDENLIVE_WARNING_DIALOG_PATTERNS,
+                        text_patterns=KDENLIVE_SAVE_CHANGES_TEXT_PATTERNS,
+                    ):
+                        continue
+                    if self._first_matching_control(candidate, KDENLIVE_DONT_SAVE_PATTERNS, control_types=("Button",)) is None:
+                        if not self._control_present(
+                            candidate,
+                            KDENLIVE_SAVE_CHANGES_TEXT_PATTERNS,
+                            control_types=("Text", "Pane", "Group", "Document", "Custom"),
+                        ):
+                            continue
+                    dialog = candidate
+                    break
+                if dialog is not None:
+                    break
             if dialog is None:
                 return dismissed
             try:
@@ -4028,16 +4727,39 @@ class KdenliveOperator(SoftwareOperator):
             if button is None:
                 logger.info(
                     "Kdenlive save dialog was found, but a discard-style button was not directly exposed. "
-                    "Trying generic close-prompt dismissal shortcuts."
+                    "Trying keyboard dismiss shortcuts before generic close-prompt dismissal."
                 )
+                for key in KDENLIVE_DONT_SAVE_DIRECT_KEYS:
+                    try:
+                        logger.info("Sending Kdenlive discard shortcut: %s", key)
+                        send_hotkey(key)
+                    except Exception:
+                        pass
                 try:
                     dismiss_close_prompts(timeout=0.8, owner_window=dialog)
                 except Exception:
                     logger.exception("Generic prompt dismissal failed while handling the Kdenlive save dialog.")
                 time.sleep(0.2)
+                dismissed = True
                 continue
             logger.info("Clicking the Kdenlive discard-style button: %s", self._wrapper_text(button) or "<untitled>")
-            click_control(button, post_click_sleep=0.5)
+            try:
+                click_control(button, post_click_sleep=0.5)
+            except Exception as exc:
+                logger.info(
+                    "Clicking the Kdenlive discard-style button failed. Falling back to keyboard shortcuts. details=%s",
+                    exc,
+                )
+                for key in KDENLIVE_DONT_SAVE_DIRECT_KEYS:
+                    try:
+                        logger.info("Sending Kdenlive discard shortcut: %s", key)
+                        send_hotkey(key)
+                    except Exception:
+                        pass
+                try:
+                    dismiss_close_prompts(timeout=0.8, owner_window=dialog)
+                except Exception:
+                    logger.exception("Generic prompt dismissal failed while handling the Kdenlive save dialog.")
             dismissed = True
         return dismissed
 
@@ -4637,9 +5359,12 @@ class KdenliveOperator(SoftwareOperator):
         logger.info("Clicking Kdenlive 'Render to File' button: %s", self._wrapper_text(render_button) or "<untitled>")
         assert render_button.is_enabled(), "Kdenlive 'Render to File' button is disabled."
         click_control(render_button)
-        overwrite_accepted = accept_overwrite_confirmation(timeout=0.8, owner_window=render_dialog, poll_interval=0.05)
+        time.sleep(0.2)
+
+    def _confirm_render_transition_after_minimizing(self, render_dialog) -> None:
+        overwrite_accepted = accept_overwrite_confirmation(timeout=0.4, owner_window=render_dialog, poll_interval=0.05)
         if not overwrite_accepted:
-            self._accept_kdenlive_overwrite_dialog_if_present(render_dialog, timeout=2.5)
+            self._accept_kdenlive_overwrite_dialog_if_present(render_dialog, timeout=0.8)
 
     def _wait_for_render_completion(self, render_dialog, output_video_path: Path) -> None:
         output_video_path = output_video_path.resolve(strict=False)
@@ -4651,7 +5376,7 @@ class KdenliveOperator(SoftwareOperator):
         finished_without_output_rounds = 0
         last_size = -1
         deadline = time.monotonic() + 7200.0
-        last_status = None
+        progress_logger = _WaitProgressLogger("Kdenlive render")
         while time.monotonic() < deadline:
             current_size = output_video_path.stat().st_size if output_video_path.exists() else 0
             if current_size > 0 and current_size == last_size:
@@ -4670,38 +5395,16 @@ class KdenliveOperator(SoftwareOperator):
                 finished_without_output_rounds += 1
             else:
                 finished_without_output_rounds = 0
-
-            status = (
-                current_size,
-                stable_rounds,
-                inactive_rounds,
-                finished_without_output_rounds,
-                render_active,
-                render_finished,
-                abort_enabled,
-                start_enabled,
-                clean_up_enabled,
-                None if progress_ratio is None else round(progress_ratio, 3),
-            )
-            if status != last_status:
-                logger.info(
-                    "Kdenlive render state. output=%s size_bytes=%d stable_rounds=%d inactive_rounds=%d finished_without_output_rounds=%d active=%s finished=%s abort_enabled=%s start_enabled=%s clean_up_enabled=%s progress_ratio=%s",
-                    output_video_path,
-                    current_size,
-                    stable_rounds,
-                    inactive_rounds,
-                    finished_without_output_rounds,
-                    render_active,
-                    render_finished,
-                    abort_enabled,
-                    start_enabled,
-                    clean_up_enabled,
-                    "n/a" if progress_ratio is None else f"{progress_ratio:.3f}",
+            progress_logger.maybe_log(
+                detail=(
+                    f"output={output_video_path.name} size_bytes={current_size} stable_rounds={stable_rounds} "
+                    f"inactive_rounds={inactive_rounds} active={render_active} finished={render_finished} "
+                    f"progress_ratio={'n/a' if progress_ratio is None else f'{progress_ratio:.3f}'}"
                 )
-                last_status = status
+            )
 
             if render_finished and current_size >= KDENLIVE_MIN_OUTPUT_BYTES:
-                logger.info("Kdenlive render completion detected from the Job Queue finished state.")
+                logger.info("Kdenlive render completion detected from the Job Queue finished state. elapsed=%s", progress_logger.elapsed_text())
                 break
 
             if render_finished and finished_without_output_rounds >= 5:
@@ -4718,7 +5421,8 @@ class KdenliveOperator(SoftwareOperator):
             ):
                 logger.info(
                     "Kdenlive render completion detected from the stable-output fallback. "
-                    "size_bytes=%d stable_rounds=%d inactive_rounds=%d",
+                    "elapsed=%s size_bytes=%d stable_rounds=%d inactive_rounds=%d",
+                    progress_logger.elapsed_text(),
                     current_size,
                     stable_rounds,
                     inactive_rounds,
@@ -4731,7 +5435,7 @@ class KdenliveOperator(SoftwareOperator):
                 and inactive_rounds >= KDENLIVE_UI_IDLE_ROUNDS
                 and (clean_up_enabled or start_enabled or (progress_ratio is not None and progress_ratio >= 0.999))
             ):
-                logger.info("Kdenlive render completion conditions satisfied.")
+                logger.info("Kdenlive render completion conditions satisfied. elapsed=%s", progress_logger.elapsed_text())
                 break
             time.sleep(KDENLIVE_RENDER_POLL_SECONDS)
         else:

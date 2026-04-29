@@ -617,16 +617,34 @@ def _try_select_file_from_dialog(dialog, file_path: Path, confirm_patterns: Sequ
     return False
 
 
-def _is_file_dialog_candidate(window, confirm_patterns: Sequence[str]) -> bool:
+def _is_file_dialog_candidate(
+    window,
+    confirm_patterns: Sequence[str],
+    dialog_patterns: Sequence[str] = DEFAULT_DIALOG_PATTERNS,
+) -> bool:
+    title = _safe_window_text(window)
+    class_name = _class_name(window)
+    control_type = _control_type(window).lower()
+    title_matches = bool(title and _matches_text(title, _compiled_patterns(dialog_patterns)))
+
     try:
-        try:
-            _find_labeled_edit(window, FILE_NAME_LABEL_PATTERNS)
-        except UiAutomationError:
-            _find_first_control(window, ("Edit", "ComboBox"))
         find_text_control(window, confirm_patterns, control_types=("Button",))
-        return True
     except UiAutomationError:
         return False
+
+    try:
+        _find_first_control(window, ("Edit", "ComboBox"))
+    except UiAutomationError:
+        return False
+
+    file_name_label_present = _dialog_has_text(window, FILE_NAME_LABEL_PATTERNS)
+    if title_matches:
+        return True
+    if class_name == "#32770":
+        return True
+    if control_type == "window" and file_name_label_present:
+        return True
+    return False
 
 
 def _dialog_has_text(window, patterns: Sequence[str]) -> bool:
@@ -671,7 +689,7 @@ def _find_nested_file_dialog(dialog_patterns: Sequence[str], confirm_patterns: S
             if not looks_like_dialog_window and not title_matches:
                 continue
             try:
-                is_candidate = _is_file_dialog_candidate(child, confirm_patterns)
+                is_candidate = _is_file_dialog_candidate(child, confirm_patterns, dialog_patterns)
             except Exception:
                 continue
             if not is_candidate:
@@ -976,14 +994,14 @@ def wait_for_file_dialog(
     while time.monotonic() < deadline:
         try:
             window = wait_for_window(dialog_patterns, timeout=0.75)
-            if _is_file_dialog_candidate(window, confirm_patterns):
+            if _is_file_dialog_candidate(window, confirm_patterns, dialog_patterns):
                 logger.info("Matched top-level file dialog: %s", _safe_window_text(window) or "<untitled>")
                 return window
         except UiAutomationError as exc:
             last_error = exc
         try:
             foreground_window = get_foreground_window()
-            if _is_file_dialog_candidate(foreground_window, confirm_patterns):
+            if _is_file_dialog_candidate(foreground_window, confirm_patterns, dialog_patterns):
                 logger.info("Matched foreground file dialog: %s", _safe_window_text(foreground_window) or "<untitled>")
                 return foreground_window
         except UiAutomationError:
@@ -1107,6 +1125,8 @@ def fill_file_dialog(
     timeout: float = 15.0,
     must_exist: bool = True,
     allow_direct_selection: bool = True,
+    wait_for_dialog_to_close: bool = True,
+    overwrite_confirmation_timeout: float | None = None,
 ) -> None:
     normalized_path = Path(file_path).resolve(strict=False)
     logger.info(
@@ -1155,34 +1175,42 @@ def fill_file_dialog(
     confirm_button = _find_last_matching_control(dialog, confirm_patterns, control_types=("Button",))
     logger.info("Clicking file dialog confirmation button: %s", _safe_window_text(confirm_button) or "<untitled>")
     click_control(confirm_button)
-    if not _wait_for_window_to_close(dialog_handle, timeout=0.8):
-        logger.info("File dialog stayed open after clicking the confirmation button. Retrying with Enter.")
-        try:
-            target = _resolve_text_entry_target(edit)
-            bring_window_to_front(dialog, keep_topmost=False)
-            try:
-                rect = _wrapper_rect(target)
-                click_x = max(5, min(18, max(1, (rect.right - rect.left)) // 10))
-                click_y = max(1, max(1, (rect.bottom - rect.top)) // 2)
-                target.click_input(coords=(click_x, click_y))
-            except Exception:
-                try:
-                    target.click_input()
-                except Exception:
-                    pass
-        except Exception:
-            bring_window_to_front(dialog, keep_topmost=False)
-        send_hotkey("{ENTER}")
+    if wait_for_dialog_to_close:
         if not _wait_for_window_to_close(dialog_handle, timeout=0.8):
-            logger.info("File dialog stayed open after Enter. Retrying with Alt+O.")
-            bring_window_to_front(dialog, keep_topmost=False)
-            send_hotkey("%o")
+            logger.info("File dialog stayed open after clicking the confirmation button. Retrying with Enter.")
+            try:
+                target = _resolve_text_entry_target(edit)
+                bring_window_to_front(dialog, keep_topmost=False)
+                try:
+                    rect = _wrapper_rect(target)
+                    click_x = max(5, min(18, max(1, (rect.right - rect.left)) // 10))
+                    click_y = max(1, max(1, (rect.bottom - rect.top)) // 2)
+                    target.click_input(coords=(click_x, click_y))
+                except Exception:
+                    try:
+                        target.click_input()
+                    except Exception:
+                        pass
+            except Exception:
+                bring_window_to_front(dialog, keep_topmost=False)
+            send_hotkey("{ENTER}")
             if not _wait_for_window_to_close(dialog_handle, timeout=0.8):
-                raise UiAutomationError(
-                    f"File dialog confirmation did not close the dialog for '{normalized_path}'."
-                )
+                logger.info("File dialog stayed open after Enter. Retrying with Alt+O.")
+                bring_window_to_front(dialog, keep_topmost=False)
+                send_hotkey("%o")
+                if not _wait_for_window_to_close(dialog_handle, timeout=0.8):
+                    raise UiAutomationError(
+                        f"File dialog confirmation did not close the dialog for '{normalized_path}'."
+                    )
     if not must_exist:
-        accept_overwrite_confirmation(timeout=2.0, owner_window=dialog, poll_interval=0.05)
+        if overwrite_confirmation_timeout is None:
+            overwrite_confirmation_timeout = 2.0
+        if overwrite_confirmation_timeout > 0:
+            accept_overwrite_confirmation(
+                timeout=overwrite_confirmation_timeout,
+                owner_window=dialog,
+                poll_interval=0.05,
+            )
 
 
 def dismiss_close_prompts(timeout: float = 2.0, owner_window=None) -> None:

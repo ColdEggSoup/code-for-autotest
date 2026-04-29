@@ -166,6 +166,247 @@ class DummyAiTurboController:
         self.close_calls += 1
 
 
+def test_build_pipeline_cases_expands_shotcut_for_4k_big_workload(tmp_path: Path) -> None:
+    big_input = tmp_path / "4K_big.mp4"
+    small_input = tmp_path / "4K_small.mp4"
+    big_input.write_bytes(b"big")
+    small_input.write_bytes(b"small")
+
+    cases = full_test_pipeline.build_pipeline_cases(
+        ("shotcut", "kdenlive"),
+        [("baseline", False)],
+        workload_name="demo",
+        input_video_path=big_input,
+    )
+
+    assert [case.case_id for case in cases] == [
+        "shotcut__baseline",
+        "shotcut__4k_1big_1small__baseline",
+        "shotcut__4k_2big_2small__baseline",
+        "kdenlive__baseline",
+        "kdenlive__4k_1big_1small__baseline",
+        "kdenlive__4k_2big_2small__baseline",
+    ]
+    assert [case.sequence_order for case in cases[:3]] == [1, 2, 3]
+    assert [case.case_slug for case in cases[:3]] == [
+        "",
+        full_test_pipeline.SHOTCUT_MULTI_CASE_SMALL_SLUG,
+        full_test_pipeline.SHOTCUT_MULTI_CASE_DOUBLE_SLUG,
+    ]
+    assert [case.sequence_name for case in cases[:3]] == [full_test_pipeline.SHOTCUT_SEQUENCE_NAME] * 3
+    assert [case.sequence_order for case in cases[3:6]] == [1, 2, 3]
+    assert [case.sequence_name for case in cases[3:6]] == [full_test_pipeline.KDENLIVE_SEQUENCE_NAME] * 3
+
+
+def test_build_pipeline_cases_keeps_default_layout_for_non_4k_big_input(tmp_path: Path) -> None:
+    input_video = tmp_path / "input.mp4"
+    input_video.write_bytes(b"video")
+
+    cases = full_test_pipeline.build_pipeline_cases(
+        ("shotcut", "kdenlive"),
+        [("baseline", False)],
+        workload_name="demo",
+        input_video_path=input_video,
+    )
+
+    assert [case.case_id for case in cases] == [
+        "shotcut__baseline",
+        "kdenlive__baseline",
+    ]
+
+
+def test_run_shotcut_case_sequence_reuses_one_session_for_three_cases(monkeypatch, tmp_path: Path) -> None:
+    big_input = tmp_path / "4K_big.mp4"
+    small_input = tmp_path / "4K_small.mp4"
+    big_input.write_bytes(b"big")
+    small_input.write_bytes(b"small")
+
+    pipeline_paths = full_test_pipeline.build_pipeline_paths(tmp_path / "results", "demo")
+    recorder = full_test_pipeline.PipelineRunRecorder(pipeline_paths.root_dir)
+    launcher = DummyLauncher()
+    monitor_bridge = DummyMonitorBridge()
+    window = object()
+    steps: list[tuple[str, object]] = []
+
+    class SequenceShotcutOperator:
+        def close(self) -> None:
+            steps.append(("close", None))
+
+        def _connect_main_window(self, timeout=30.0):
+            steps.append(("connect", timeout))
+            return window
+
+        def _open_input_clip(self, current_window, input_path: Path):
+            assert current_window is window or current_window is None
+            steps.append(("open_input", input_path.name))
+            return window
+
+        def _append_selected_clip_to_timeline(self, current_window) -> None:
+            assert current_window is window
+            steps.append(("append", None))
+
+        def _export_current_timeline(self, current_window, output_path: Path):
+            assert current_window is window
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"video")
+            steps.append(("export", output_path.name))
+            return window
+
+    monkeypatch.setattr(full_test_pipeline, "build_operator", lambda software: SequenceShotcutOperator())
+
+    cases = full_test_pipeline.build_pipeline_cases(
+        ("shotcut",),
+        [("baseline", False)],
+        workload_name="demo",
+        input_video_path=big_input,
+    )
+
+    results = full_test_pipeline.run_shotcut_case_sequence(
+        cases=cases,
+        workload_name="demo",
+        input_video_path=big_input,
+        pipeline_paths=pipeline_paths,
+        launcher=launcher,
+        monitor_bridge=monitor_bridge,
+        ai_turbo_controller=None,
+        recorder=recorder,
+    )
+
+    assert launcher.launched == ["shotcut"]
+    assert launcher.waited == [("shotcut", 30.0)]
+    assert [name for name, _ in steps] == [
+        "close",
+        "connect",
+        "open_input",
+        "append",
+        "export",
+        "open_input",
+        "append",
+        "export",
+        "append",
+        "open_input",
+        "append",
+        "export",
+        "close",
+    ]
+    assert steps[2:5] == [("open_input", "4K_big.mp4"), ("append", None), ("export", "shotcut_demo_baseline.mp4")]
+    assert steps[5:8] == [
+        ("open_input", "4K_small.mp4"),
+        ("append", None),
+        ("export", "shotcut_4k_1big_1small_baseline.mp4"),
+    ]
+    assert steps[8:12] == [
+        ("append", None),
+        ("open_input", "4K_big.mp4"),
+        ("append", None),
+        ("export", "shotcut_4k_2big_2small_baseline.mp4"),
+    ]
+    assert [result.case_id for result, _ in results] == [
+        "shotcut__baseline",
+        "shotcut__4k_1big_1small__baseline",
+        "shotcut__4k_2big_2small__baseline",
+    ]
+    assert [monitor_path.name for _, monitor_path in [(case, result.csv_path) for case, result in results if result is not None]] == [
+        "shotcut_demo_baseline.csv",
+        "shotcut_4k_1big_1small_baseline.csv",
+        "shotcut_4k_2big_2small_baseline.csv",
+    ]
+
+
+def test_run_kdenlive_case_sequence_reuses_one_session_for_three_cases(monkeypatch, tmp_path: Path) -> None:
+    big_input = tmp_path / "4K_big.mp4"
+    small_input = tmp_path / "4K_small.mp4"
+    big_input.write_bytes(b"big")
+    small_input.write_bytes(b"small")
+
+    pipeline_paths = full_test_pipeline.build_pipeline_paths(tmp_path / "results", "demo")
+    recorder = full_test_pipeline.PipelineRunRecorder(pipeline_paths.root_dir)
+    launcher = DummyLauncher()
+    monitor_bridge = DummyMonitorBridge()
+    window = object()
+    steps: list[tuple[str, object]] = []
+
+    class SequenceKdenliveOperator:
+        def close(self) -> None:
+            steps.append(("close", None))
+
+        def _connect_main_window(self, timeout=30.0):
+            steps.append(("connect", timeout))
+            return window
+
+        def _open_input_clip(self, current_window, input_path: Path):
+            assert current_window is window or current_window is None
+            steps.append(("open_input", input_path.name))
+            return window
+
+        def _insert_clip_to_timeline(self, current_window) -> None:
+            assert current_window is window
+            steps.append(("insert", None))
+
+        def _close_render_dialog_only(self) -> None:
+            steps.append(("close_render_dialog", None))
+
+        def _render_current_timeline(self, current_window, output_path: Path):
+            assert current_window is window
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"video")
+            steps.append(("render", output_path.name))
+            return window
+
+    monkeypatch.setattr(full_test_pipeline, "build_operator", lambda software: SequenceKdenliveOperator())
+
+    cases = tuple(
+        case
+        for case in full_test_pipeline.build_pipeline_cases(
+            ("kdenlive",),
+            [("baseline", False)],
+            workload_name="demo",
+            input_video_path=big_input,
+        )
+        if case.software == "kdenlive"
+    )
+
+    results = full_test_pipeline.run_kdenlive_case_sequence(
+        cases=cases,
+        workload_name="demo",
+        input_video_path=big_input,
+        pipeline_paths=pipeline_paths,
+        launcher=launcher,
+        monitor_bridge=monitor_bridge,
+        ai_turbo_controller=None,
+        recorder=recorder,
+    )
+
+    assert launcher.launched == ["kdenlive"]
+    assert launcher.waited == [("kdenlive", 30.0)]
+    assert [name for name, _ in steps] == [
+        "close",
+        "connect",
+        "open_input",
+        "insert",
+        "render",
+        "open_input",
+        "insert",
+        "render",
+        "close_render_dialog",
+        "insert",
+        "open_input",
+        "insert",
+        "render",
+        "close",
+    ]
+    assert [case.case_id for case, _ in results] == [
+        "kdenlive__baseline",
+        "kdenlive__4k_1big_1small__baseline",
+        "kdenlive__4k_2big_2small__baseline",
+    ]
+    assert [result.csv_path.name for case, result in results if result is not None] == [
+        "kdenlive_demo_baseline.csv",
+        "kdenlive_4k_1big_1small_baseline.csv",
+        "kdenlive_4k_2big_2small_baseline.csv",
+    ]
+
+
 def test_run_pipeline_with_test_doubles_generates_comparison_report(monkeypatch, tmp_path: Path) -> None:
     input_video = tmp_path / "input.mp4"
     input_video.write_bytes(b"input-video")
@@ -434,6 +675,19 @@ def test_run_non_blender_case_stops_monitor_after_automation(monkeypatch, tmp_pa
     assert result.csv_path.exists()
     assert monitor_bridge.stopped_sessions == [f"{software}-demo_baseline"]
     assert monitor_bridge.waited_sessions == []
+
+
+def test_build_export_output_path_uses_mkv_for_avidemux(tmp_path: Path) -> None:
+    pipeline_paths = full_test_pipeline.build_pipeline_paths(tmp_path / "results", "demo")
+
+    output_path = full_test_pipeline.build_export_output_path(
+        pipeline_paths,
+        software="avidemux",
+        workload_name="demo",
+        variant="baseline",
+    )
+
+    assert output_path.suffix == ".mkv"
 
 
 def test_run_pipeline_resume_reruns_only_failed_cases(monkeypatch, tmp_path: Path) -> None:

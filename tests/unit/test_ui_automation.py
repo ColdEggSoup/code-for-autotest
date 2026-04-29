@@ -180,6 +180,70 @@ def test_numeric_window_metadata_accepts_bound_methods() -> None:
     assert ui_automation._get_window_handle(window) == 5566
 
 
+def test_is_file_dialog_candidate_rejects_editor_window_with_matching_buttons() -> None:
+    editor_window = _DummyWindow(
+        "test_software_operations.py - code-for-autotest - Visual Studio Code",
+        2002,
+        top=20,
+        left=20,
+    )
+    editor_window._children.extend(
+        [
+            _DummyWindow("", 2002, top=80, left=120, control_type="Edit"),
+            _DummyWindow("打开更改", 2002, top=80, left=320, control_type="Button"),
+        ]
+    )
+
+    assert ui_automation._is_file_dialog_candidate(
+        editor_window,
+        ui_automation.DEFAULT_CONFIRM_PATTERNS,
+        ui_automation.DEFAULT_DIALOG_PATTERNS,
+    ) is False
+
+
+def test_is_file_dialog_candidate_accepts_standard_open_dialog() -> None:
+    dialog = _DummyWindow("打开", 2002, top=20, left=20, class_name="#32770")
+    dialog._children.extend(
+        [
+            _DummyWindow("文件名(N):", 2002, top=80, left=40, control_type="Text"),
+            _DummyWindow("", 2002, top=80, left=180, control_type="Edit"),
+            _DummyWindow("打开(O)", 2002, top=80, left=420, control_type="Button"),
+        ]
+    )
+
+    assert ui_automation._is_file_dialog_candidate(
+        dialog,
+        ui_automation.DEFAULT_CONFIRM_PATTERNS,
+        ui_automation.DEFAULT_DIALOG_PATTERNS,
+    ) is True
+
+
+def test_wait_for_file_dialog_ignores_foreground_editor_window(monkeypatch) -> None:
+    editor_window = _DummyWindow(
+        "test_software_operations.py - code-for-autotest - Visual Studio Code",
+        2002,
+        top=20,
+        left=20,
+    )
+    editor_window._children.extend(
+        [
+            _DummyWindow("", 2002, top=80, left=120, control_type="Edit"),
+            _DummyWindow("打开更改", 2002, top=80, left=320, control_type="Button"),
+        ]
+    )
+    nested_dialog = _DummyWindow("打开", 2002, top=40, left=40, class_name="#32770")
+
+    monkeypatch.setattr(
+        ui_automation,
+        "wait_for_window",
+        lambda patterns, timeout=0.75: (_ for _ in ()).throw(ui_automation.UiAutomationError("not found")),
+    )
+    monkeypatch.setattr(ui_automation, "get_foreground_window", lambda: editor_window)
+    monkeypatch.setattr(ui_automation, "_find_nested_file_dialog", lambda dialog_patterns, confirm_patterns: nested_dialog)
+
+    assert ui_automation.wait_for_file_dialog(timeout=0.2) is nested_dialog
+
+
 def test_request_window_close_posts_wm_close_to_target_handle(monkeypatch) -> None:
     window = _DummyWindow("Shotcut", 2002, top=20, left=20, handle=5566)
     posted_messages: list[tuple[int, int, int, int]] = []
@@ -300,3 +364,45 @@ def test_fill_file_dialog_uses_bottom_filename_input_when_label_missing(monkeypa
     assert captured["edit"] is filename_combo
     assert str(captured["value"]).endswith("input.mp4")
     assert captured["confirm"] is confirm_button
+
+
+def test_fill_file_dialog_can_skip_waiting_for_dialog_close_after_confirm(monkeypatch, tmp_path) -> None:
+    file_path = tmp_path / "output.mp4"
+    dialog = _DummyWindow("Save", 2002, top=0, left=0, right=1000, bottom=700, handle=5566, control_type="Window")
+    filename_combo = _DummyWindow("", 2002, top=560, left=180, right=820, bottom=595, control_type="ComboBox")
+    confirm_button = _DummyWindow("Save", 2002, top=560, left=850, right=940, bottom=595, control_type="Button")
+    dialog._children = [filename_combo, confirm_button]
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(ui_automation, "wait_for_file_dialog", lambda **kwargs: dialog)
+    monkeypatch.setattr(ui_automation, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ui_automation, "_dialog_contains_file", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        ui_automation,
+        "_set_edit_value",
+        lambda edit_wrapper, value: captured.update({"edit": edit_wrapper, "value": value}),
+    )
+    monkeypatch.setattr(ui_automation, "click_control", lambda control, post_click_sleep=0.4: captured.setdefault("confirm", control))
+    monkeypatch.setattr(
+        ui_automation,
+        "_wait_for_window_to_close",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not wait for dialog close")),
+    )
+    monkeypatch.setattr(
+        ui_automation,
+        "accept_overwrite_confirmation",
+        lambda timeout=0.0, owner_window=None, poll_interval=0.05: captured.setdefault("overwrite_timeout", timeout) or False,
+    )
+
+    ui_automation.fill_file_dialog(
+        file_path,
+        confirm_patterns=(r"^Save$",),
+        must_exist=False,
+        wait_for_dialog_to_close=False,
+        overwrite_confirmation_timeout=0.5,
+    )
+
+    assert captured["edit"] is filename_combo
+    assert str(captured["value"]).endswith("output.mp4")
+    assert captured["confirm"] is confirm_button
+    assert captured["overwrite_timeout"] == 0.5

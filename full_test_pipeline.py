@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_SOFTWARE_ORDER = ("shotcut", "kdenlive", "shutter_encoder", "avidemux", "handbrake", "blender")
 MONITOR_STOP_AFTER_AUTOMATION_SOFTWARE = frozenset({"avidemux", "kdenlive"})
 PIPELINE_STATE_SCHEMA_VERSION = 1
+SHOTCUT_SEQUENCE_NAME = "shotcut_multi_export"
+SHOTCUT_MULTI_CASE_SMALL_NAME = "4k(1大1小)"
+SHOTCUT_MULTI_CASE_DOUBLE_NAME = "4k(2大2小)"
+SHOTCUT_MULTI_CASE_SMALL_SLUG = "4k_1big_1small"
+SHOTCUT_MULTI_CASE_DOUBLE_SLUG = "4k_2big_2small"
+SHOTCUT_MULTI_CASE_SMALL_NAME = "4k(1\u59271\u5c0f)"
+SHOTCUT_MULTI_CASE_DOUBLE_NAME = "4k(2\u59272\u5c0f)"
+KDENLIVE_SEQUENCE_NAME = "kdenlive_multi_render"
+MULTI_CLIP_SEQUENCE_SOFTWARE = frozenset({"shotcut", "kdenlive"})
 
 
 @dataclass(frozen=True)
@@ -52,6 +61,10 @@ class PipelineCase:
     software: str
     variant: str
     ai_turbo_enabled: bool
+    case_name: str = ""
+    case_slug: str = ""
+    sequence_name: str = ""
+    sequence_order: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,10 +92,12 @@ def _now_timestamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def build_case_id(software: str, variant: str) -> str:
-    normalized_software = slugify(software)
-    normalized_variant = slugify(variant)
-    return f"{normalized_software}__{normalized_variant}"
+def build_case_id(software: str, variant: str, *, case_slug: str = "") -> str:
+    pieces = [slugify(software)]
+    if case_slug:
+        pieces.append(slugify(case_slug))
+    pieces.append(slugify(variant))
+    return "__".join(pieces)
 
 
 def resolve_selected_software(args: argparse.Namespace) -> tuple[str, ...]:
@@ -109,19 +124,69 @@ def resolve_ai_turbo_sequence_software(args: argparse.Namespace) -> str:
     return selected_software[0]
 
 
+def should_expand_shotcut_cases(input_video_path: Path) -> bool:
+    return input_video_path.name.casefold() == "4k_big.mp4" and input_video_path.with_name("4K_small.mp4").exists()
+
+
+def should_expand_multi_clip_cases(input_video_path: Path) -> bool:
+    return should_expand_shotcut_cases(input_video_path)
+
+
 def build_pipeline_cases(
     selected_software: tuple[str, ...],
     passes: list[tuple[str, bool]],
+    *,
+    workload_name: str,
+    input_video_path: Path,
 ) -> tuple[PipelineCase, ...]:
     cases: list[PipelineCase] = []
+    expand_multi_clip_cases = should_expand_multi_clip_cases(input_video_path)
     for variant, enable_turbo in passes:
         for software in selected_software:
+            if software in MULTI_CLIP_SEQUENCE_SOFTWARE and expand_multi_clip_cases:
+                sequence_name = SHOTCUT_SEQUENCE_NAME if software == "shotcut" else KDENLIVE_SEQUENCE_NAME
+                cases.extend(
+                    [
+                        PipelineCase(
+                            case_id=build_case_id(software, variant),
+                            software=software,
+                            variant=variant,
+                            ai_turbo_enabled=enable_turbo,
+                            case_name=workload_name,
+                            case_slug="",
+                            sequence_name=sequence_name,
+                            sequence_order=1,
+                        ),
+                        PipelineCase(
+                            case_id=build_case_id(software, variant, case_slug=SHOTCUT_MULTI_CASE_SMALL_SLUG),
+                            software=software,
+                            variant=variant,
+                            ai_turbo_enabled=enable_turbo,
+                            case_name=SHOTCUT_MULTI_CASE_SMALL_NAME,
+                            case_slug=SHOTCUT_MULTI_CASE_SMALL_SLUG,
+                            sequence_name=sequence_name,
+                            sequence_order=2,
+                        ),
+                        PipelineCase(
+                            case_id=build_case_id(software, variant, case_slug=SHOTCUT_MULTI_CASE_DOUBLE_SLUG),
+                            software=software,
+                            variant=variant,
+                            ai_turbo_enabled=enable_turbo,
+                            case_name=SHOTCUT_MULTI_CASE_DOUBLE_NAME,
+                            case_slug=SHOTCUT_MULTI_CASE_DOUBLE_SLUG,
+                            sequence_name=sequence_name,
+                            sequence_order=3,
+                        ),
+                    ]
+                )
+                continue
             cases.append(
                 PipelineCase(
                     case_id=build_case_id(software, variant),
                     software=software,
                     variant=variant,
                     ai_turbo_enabled=enable_turbo,
+                    case_name=workload_name,
                 )
             )
     return tuple(cases)
@@ -152,8 +217,10 @@ def build_requested_csv_path(
     software: str,
     workload_name: str,
     variant: str,
+    case_slug: str = "",
 ) -> Path:
-    return (pipeline_paths.csv_dir / f"{software}_{slugify(workload_name)}_{variant}.csv").resolve(strict=False)
+    name_token = case_slug or slugify(workload_name)
+    return (pipeline_paths.csv_dir / f"{software}_{name_token}_{variant}.csv").resolve(strict=False)
 
 
 def build_export_output_path(
@@ -162,10 +229,12 @@ def build_export_output_path(
     software: str,
     workload_name: str,
     variant: str,
+    case_slug: str = "",
 ) -> Path:
     export_profile = OPERATION_PROFILES[software]
+    name_token = case_slug or slugify(workload_name)
     return (
-        pipeline_paths.export_dir / f"{software}_{slugify(workload_name)}_{variant}{export_profile.output_suffix}"
+        pipeline_paths.export_dir / f"{software}_{name_token}_{variant}{export_profile.output_suffix}"
     ).resolve(strict=False)
 
 
@@ -211,6 +280,10 @@ def write_pipeline_manifest(
                 "software": case.software,
                 "variant": case.variant,
                 "ai_turbo_enabled": case.ai_turbo_enabled,
+                "case_name": case.case_name,
+                "case_slug": case.case_slug,
+                "sequence_name": case.sequence_name,
+                "sequence_order": case.sequence_order,
                 "case_state_path": str(build_case_paths(pipeline_paths, case).state_path),
             }
             for case in cases
@@ -246,6 +319,10 @@ class PipelineCaseTracker:
             "case_id": self.case.case_id,
             "software": self.case.software,
             "variant": self.case.variant,
+            "case_name": self.case.case_name,
+            "case_slug": self.case.case_slug,
+            "sequence_name": self.case.sequence_name,
+            "sequence_order": self.case.sequence_order,
             "status": "pending",
             "attempt_count": 0,
             "created_at": _now_timestamp(),
@@ -791,6 +868,526 @@ def run_non_blender_case(
     )
 
 
+def build_case_monitor_name(case: PipelineCase, *, workload_name: str) -> str:
+    case_name = case.case_name or workload_name
+    return f"{case_name}_{case.variant}"
+
+
+def build_case_requested_csv_path(
+    pipeline_paths: PipelinePaths,
+    *,
+    case: PipelineCase,
+    workload_name: str,
+) -> Path:
+    return build_requested_csv_path(
+        pipeline_paths,
+        software=case.software,
+        workload_name=workload_name,
+        variant=case.variant,
+        case_slug=case.case_slug,
+    )
+
+
+def build_case_export_output_path(
+    pipeline_paths: PipelinePaths,
+    *,
+    case: PipelineCase,
+    workload_name: str,
+) -> Path | None:
+    if case.software == "blender":
+        return None
+    return build_export_output_path(
+        pipeline_paths,
+        software=case.software,
+        workload_name=workload_name,
+        variant=case.variant,
+        case_slug=case.case_slug,
+    )
+
+
+def run_shotcut_case_sequence(
+    *,
+    cases: tuple[PipelineCase, ...],
+    workload_name: str,
+    input_video_path: Path,
+    pipeline_paths: PipelinePaths,
+    launcher: SoftwareLauncher,
+    monitor_bridge: MonitorBridge,
+    ai_turbo_controller: AiTurboEngineController | None,
+    recorder: PipelineRunRecorder,
+) -> list[tuple[PipelineCase, CaseExecutionResult | None]]:
+    assert cases, "Shotcut case sequence must not be empty."
+    assert all(case.software == "shotcut" for case in cases), cases
+    small_input_video_path = input_video_path.with_name("4K_small.mp4")
+    assert small_input_video_path.exists(), f"Expected companion Shotcut input video is missing: {small_input_video_path}"
+
+    operator = build_operator("shotcut")
+    csv_results: list[tuple[PipelineCase, CaseExecutionResult | None]] = []
+    pending_cases = [
+        case
+        for case in cases
+        if PipelineCaseTracker(pipeline_paths, case).completed_csv_path() is None
+    ]
+    if not pending_cases:
+        for case in cases:
+            csv_results.append((case, None))
+        return csv_results
+
+    logger.info("Closing any leftover shotcut window before starting a clean run.")
+    operator.close()
+    if ai_turbo_controller is not None:
+        logger.info("Configuring AI Turbo Engine Performance Boost for shotcut.")
+        ai_turbo_controller.configure_for_software("shotcut")
+
+    window = None
+    launched = False
+    try:
+        for case in cases:
+            case_tracker = PipelineCaseTracker(pipeline_paths, case)
+            case_tracker.ensure_registered()
+            completed_csv_path = case_tracker.completed_csv_path()
+            if completed_csv_path is not None:
+                logger.info(
+                    "Skipping pipeline case because a completed case_state already exists. software=%s variant=%s case_name=%s csv=%s",
+                    case.software,
+                    case.variant,
+                    case.case_name or workload_name,
+                    completed_csv_path,
+                )
+                case_tracker.record_reused()
+                recorder.record(
+                    "case",
+                    "completed",
+                    case_id=case.case_id,
+                    software=case.software,
+                    variant=case.variant,
+                    csv_path=str(completed_csv_path),
+                    session_id=str(case_tracker.state.get("session_id", "") or ""),
+                    reused="true",
+                    case_state_path=str(case_tracker.paths.state_path),
+                    log_path=str(case_tracker.paths.log_path),
+                )
+                csv_results.append((case, None))
+                continue
+
+            run_name = build_case_monitor_name(case, workload_name=workload_name)
+            launch_result = None
+            try:
+                if not launched:
+                    logger.info("Launching shotcut for the %s run.", case.variant)
+                    launcher.launch("shotcut")
+                    launcher.wait_for_main_window("shotcut", timeout=30.0)
+                    launched = True
+                    window = operator._connect_main_window(
+                        timeout=max(30.0, SOFTWARE_SPECS["shotcut"].startup_timeout_seconds)
+                    )
+
+                requested_csv_path = build_case_requested_csv_path(
+                    pipeline_paths,
+                    case=case,
+                    workload_name=workload_name,
+                )
+                output_video_path = build_case_export_output_path(
+                    pipeline_paths,
+                    case=case,
+                    workload_name=workload_name,
+                )
+                assert output_video_path is not None
+
+                current_input_path = small_input_video_path if case.sequence_order == 2 else input_video_path
+                case_tracker.start_attempt(
+                    input_path=current_input_path.resolve(strict=False),
+                    requested_output_path=requested_csv_path,
+                    export_output_path=output_video_path,
+                )
+                recorder.record(
+                    "case",
+                    "started",
+                    case_id=case.case_id,
+                    software=case.software,
+                    variant=case.variant,
+                    case_state_path=str(case_tracker.paths.state_path),
+                    log_path=str(case_tracker.paths.log_path),
+                )
+                logger.info(
+                    "Starting the shotcut background timing monitor for case '%s'. csv=%s",
+                    run_name,
+                    requested_csv_path,
+                )
+                launch_result = monitor_bridge.start_background_monitor("shotcut", run_name, requested_csv_path)
+                case_tracker.update_monitor_metadata(
+                    session_id=launch_result.session_id,
+                    output_path=launch_result.output_path,
+                    monitor_state_path=launch_result.state_path,
+                    session_output_path=launch_result.session_output_path,
+                    worker_stdout_path=launch_result.worker_stdout_path,
+                    worker_stderr_path=launch_result.worker_stderr_path,
+                )
+                recorder.record(
+                    "monitor",
+                    "started",
+                    software="shotcut",
+                    variant=case.variant,
+                    csv_path=str(requested_csv_path),
+                )
+                case_tracker.record_stage(
+                    "monitor",
+                    "started",
+                    session_id=launch_result.session_id,
+                    csv_path=str(launch_result.output_path),
+                )
+                recorder.record("launch", "completed", software="shotcut", variant=case.variant)
+                case_tracker.record_stage("launch", "completed")
+                recorder.record("automation", "started", software="shotcut", variant=case.variant)
+                case_tracker.record_stage("automation", "started")
+
+                logger.info("Running the shotcut UI automation flow for case '%s'.", run_name)
+                if case.sequence_order == 1:
+                    window = operator._open_input_clip(window, input_video_path)
+                    operator._append_selected_clip_to_timeline(window)
+                elif case.sequence_order == 2:
+                    window = operator._open_input_clip(window, small_input_video_path)
+                    operator._append_selected_clip_to_timeline(window)
+                elif case.sequence_order == 3:
+                    operator._append_selected_clip_to_timeline(window)
+                    window = operator._open_input_clip(window, input_video_path)
+                    operator._append_selected_clip_to_timeline(window)
+                else:
+                    raise AssertionError(f"Unsupported Shotcut sequence order: {case.sequence_order}")
+                window = operator._export_current_timeline(window, output_video_path)
+                recorder.record(
+                    "automation",
+                    "completed",
+                    software="shotcut",
+                    variant=case.variant,
+                    output_video=str(output_video_path),
+                )
+                case_tracker.record_stage("automation", "completed", output_video=str(output_video_path))
+                logger.info(
+                    "Automation for shotcut case '%s' has completed. Finalizing its timing monitor immediately.",
+                    run_name,
+                )
+                status_payload = monitor_bridge.stop_session(launch_result.session_id)
+            except Exception as exc:
+                logger.exception("shotcut %s case '%s' failed. Requesting the monitor session to stop.", case.variant, run_name)
+                recorder.record("automation", "failed", software="shotcut", variant=case.variant, error=str(exc))
+                case_tracker.record_stage("automation", "failed", error=str(exc))
+                try:
+                    if launch_result is not None:
+                        monitor_bridge.stop_session(launch_result.session_id)
+                except Exception as stop_exc:
+                    logger.warning(
+                        "Could not stop the shotcut monitor session cleanly while unwinding the failed case. "
+                        "session_id=%s error=%s",
+                        launch_result.session_id if launch_result is not None else "",
+                        stop_exc,
+                    )
+                traceback_path = case_tracker.mark_failed(exc)
+                recorder.record(
+                    "case",
+                    "failed",
+                    case_id=case.case_id,
+                    software=case.software,
+                    variant=case.variant,
+                    error=str(exc),
+                    case_state_path=str(case_tracker.paths.state_path),
+                    log_path=str(case_tracker.paths.log_path),
+                    traceback_path=str(traceback_path),
+                )
+                raise
+
+            recorder.record("cleanup", "started", software="shotcut", variant=case.variant)
+            case_tracker.record_stage("cleanup", "started")
+            recorder.record("cleanup", "completed", software="shotcut", variant=case.variant)
+            case_tracker.record_stage("cleanup", "completed")
+
+            assert status_payload["status"] in {"completed", "completed_with_warnings"}, status_payload
+            resolved_output_path = Path(status_payload.get("aggregate_output_path") or str(launch_result.output_path)).resolve(strict=False)
+            assert resolved_output_path.exists(), f"Expected csv output was not created: {resolved_output_path}"
+            result = CaseExecutionResult(
+                csv_path=resolved_output_path,
+                requested_csv_path=requested_csv_path,
+                export_output_path=output_video_path,
+                session_id=launch_result.session_id,
+                monitor_status=str(status_payload["status"]),
+                monitor_state_path=Path(status_payload["state_path"]).resolve(strict=False)
+                if status_payload.get("state_path")
+                else launch_result.state_path,
+                session_output_path=Path(status_payload["session_output_path"]).resolve(strict=False)
+                if status_payload.get("session_output_path")
+                else launch_result.session_output_path,
+                worker_stdout_path=Path(status_payload["worker_stdout_path"]).resolve(strict=False)
+                if status_payload.get("worker_stdout_path")
+                else launch_result.worker_stdout_path,
+                worker_stderr_path=Path(status_payload["worker_stderr_path"]).resolve(strict=False)
+                if status_payload.get("worker_stderr_path")
+                else launch_result.worker_stderr_path,
+            )
+            case_tracker.mark_completed(result)
+            recorder.record(
+                "case",
+                "completed",
+                case_id=case.case_id,
+                software=case.software,
+                variant=case.variant,
+                csv_path=str(result.csv_path),
+                session_id=result.session_id,
+                case_state_path=str(case_tracker.paths.state_path),
+                log_path=str(case_tracker.paths.log_path),
+            )
+            csv_results.append((case, result))
+    finally:
+        if launched:
+            try:
+                operator.close()
+            except Exception:
+                logger.exception("Shotcut close failed while finalizing the multi-case sequence.")
+                raise
+    return csv_results
+
+
+def run_kdenlive_case_sequence(
+    *,
+    cases: tuple[PipelineCase, ...],
+    workload_name: str,
+    input_video_path: Path,
+    pipeline_paths: PipelinePaths,
+    launcher: SoftwareLauncher,
+    monitor_bridge: MonitorBridge,
+    ai_turbo_controller: AiTurboEngineController | None,
+    recorder: PipelineRunRecorder,
+) -> list[tuple[PipelineCase, CaseExecutionResult | None]]:
+    assert cases, "Kdenlive case sequence must not be empty."
+    assert all(case.software == "kdenlive" for case in cases), cases
+    small_input_video_path = input_video_path.with_name("4K_small.mp4")
+    assert small_input_video_path.exists(), f"Expected companion Kdenlive input video is missing: {small_input_video_path}"
+
+    operator = build_operator("kdenlive")
+    csv_results: list[tuple[PipelineCase, CaseExecutionResult | None]] = []
+    pending_cases = [
+        case
+        for case in cases
+        if PipelineCaseTracker(pipeline_paths, case).completed_csv_path() is None
+    ]
+    if not pending_cases:
+        for case in cases:
+            csv_results.append((case, None))
+        return csv_results
+
+    logger.info("Closing any leftover kdenlive window before starting a clean run.")
+    operator.close()
+    if ai_turbo_controller is not None:
+        logger.info("Configuring AI Turbo Engine Performance Boost for kdenlive.")
+        ai_turbo_controller.configure_for_software("kdenlive")
+
+    window = None
+    launched = False
+    try:
+        for case in cases:
+            case_tracker = PipelineCaseTracker(pipeline_paths, case)
+            case_tracker.ensure_registered()
+            completed_csv_path = case_tracker.completed_csv_path()
+            if completed_csv_path is not None:
+                logger.info(
+                    "Skipping pipeline case because a completed case_state already exists. software=%s variant=%s case_name=%s csv=%s",
+                    case.software,
+                    case.variant,
+                    case.case_name or workload_name,
+                    completed_csv_path,
+                )
+                case_tracker.record_reused()
+                recorder.record(
+                    "case",
+                    "completed",
+                    case_id=case.case_id,
+                    software=case.software,
+                    variant=case.variant,
+                    csv_path=str(completed_csv_path),
+                    session_id=str(case_tracker.state.get("session_id", "") or ""),
+                    reused="true",
+                    case_state_path=str(case_tracker.paths.state_path),
+                    log_path=str(case_tracker.paths.log_path),
+                )
+                csv_results.append((case, None))
+                continue
+
+            run_name = build_case_monitor_name(case, workload_name=workload_name)
+            launch_result = None
+            try:
+                if not launched:
+                    logger.info("Launching kdenlive for the %s run.", case.variant)
+                    launcher.launch("kdenlive")
+                    launcher.wait_for_main_window("kdenlive", timeout=30.0)
+                    launched = True
+                    window = operator._connect_main_window(
+                        timeout=max(30.0, SOFTWARE_SPECS["kdenlive"].startup_timeout_seconds)
+                    )
+
+                requested_csv_path = build_case_requested_csv_path(
+                    pipeline_paths,
+                    case=case,
+                    workload_name=workload_name,
+                )
+                output_video_path = build_case_export_output_path(
+                    pipeline_paths,
+                    case=case,
+                    workload_name=workload_name,
+                )
+                assert output_video_path is not None
+
+                current_input_path = small_input_video_path if case.sequence_order == 2 else input_video_path
+                case_tracker.start_attempt(
+                    input_path=current_input_path.resolve(strict=False),
+                    requested_output_path=requested_csv_path,
+                    export_output_path=output_video_path,
+                )
+                recorder.record(
+                    "case",
+                    "started",
+                    case_id=case.case_id,
+                    software=case.software,
+                    variant=case.variant,
+                    case_state_path=str(case_tracker.paths.state_path),
+                    log_path=str(case_tracker.paths.log_path),
+                )
+                logger.info(
+                    "Starting the kdenlive background timing monitor for case '%s'. csv=%s",
+                    run_name,
+                    requested_csv_path,
+                )
+                launch_result = monitor_bridge.start_background_monitor("kdenlive", run_name, requested_csv_path)
+                case_tracker.update_monitor_metadata(
+                    session_id=launch_result.session_id,
+                    output_path=launch_result.output_path,
+                    monitor_state_path=launch_result.state_path,
+                    session_output_path=launch_result.session_output_path,
+                    worker_stdout_path=launch_result.worker_stdout_path,
+                    worker_stderr_path=launch_result.worker_stderr_path,
+                )
+                recorder.record(
+                    "monitor",
+                    "started",
+                    software="kdenlive",
+                    variant=case.variant,
+                    csv_path=str(requested_csv_path),
+                )
+                case_tracker.record_stage(
+                    "monitor",
+                    "started",
+                    session_id=launch_result.session_id,
+                    csv_path=str(launch_result.output_path),
+                )
+                recorder.record("launch", "completed", software="kdenlive", variant=case.variant)
+                case_tracker.record_stage("launch", "completed")
+                recorder.record("automation", "started", software="kdenlive", variant=case.variant)
+                case_tracker.record_stage("automation", "started")
+
+                logger.info("Running the kdenlive UI automation flow for case '%s'.", run_name)
+                if case.sequence_order == 1:
+                    window = operator._open_input_clip(window, input_video_path)
+                    operator._insert_clip_to_timeline(window)
+                elif case.sequence_order == 2:
+                    window = operator._open_input_clip(window, small_input_video_path)
+                    operator._insert_clip_to_timeline(window)
+                elif case.sequence_order == 3:
+                    operator._close_render_dialog_only()
+                    operator._insert_clip_to_timeline(window)
+                    window = operator._open_input_clip(window, input_video_path)
+                    operator._insert_clip_to_timeline(window)
+                else:
+                    raise AssertionError(f"Unsupported Kdenlive sequence order: {case.sequence_order}")
+                window = operator._render_current_timeline(window, output_video_path)
+                recorder.record(
+                    "automation",
+                    "completed",
+                    software="kdenlive",
+                    variant=case.variant,
+                    output_video=str(output_video_path),
+                )
+                case_tracker.record_stage("automation", "completed", output_video=str(output_video_path))
+                logger.info(
+                    "Automation for kdenlive case '%s' has completed. Finalizing its timing monitor immediately.",
+                    run_name,
+                )
+                status_payload = monitor_bridge.stop_session(launch_result.session_id)
+            except Exception as exc:
+                logger.exception("kdenlive %s case '%s' failed. Requesting the monitor session to stop.", case.variant, run_name)
+                recorder.record("automation", "failed", software="kdenlive", variant=case.variant, error=str(exc))
+                case_tracker.record_stage("automation", "failed", error=str(exc))
+                try:
+                    if launch_result is not None:
+                        monitor_bridge.stop_session(launch_result.session_id)
+                except Exception as stop_exc:
+                    logger.warning(
+                        "Could not stop the kdenlive monitor session cleanly while unwinding the failed case. "
+                        "session_id=%s error=%s",
+                        launch_result.session_id if launch_result is not None else "",
+                        stop_exc,
+                    )
+                traceback_path = case_tracker.mark_failed(exc)
+                recorder.record(
+                    "case",
+                    "failed",
+                    case_id=case.case_id,
+                    software=case.software,
+                    variant=case.variant,
+                    error=str(exc),
+                    case_state_path=str(case_tracker.paths.state_path),
+                    log_path=str(case_tracker.paths.log_path),
+                    traceback_path=str(traceback_path),
+                )
+                raise
+
+            recorder.record("cleanup", "started", software="kdenlive", variant=case.variant)
+            case_tracker.record_stage("cleanup", "started")
+            recorder.record("cleanup", "completed", software="kdenlive", variant=case.variant)
+            case_tracker.record_stage("cleanup", "completed")
+
+            assert status_payload["status"] in {"completed", "completed_with_warnings"}, status_payload
+            resolved_output_path = Path(status_payload.get("aggregate_output_path") or str(launch_result.output_path)).resolve(strict=False)
+            assert resolved_output_path.exists(), f"Expected csv output was not created: {resolved_output_path}"
+            result = CaseExecutionResult(
+                csv_path=resolved_output_path,
+                requested_csv_path=requested_csv_path,
+                export_output_path=output_video_path,
+                session_id=launch_result.session_id,
+                monitor_status=str(status_payload["status"]),
+                monitor_state_path=Path(status_payload["state_path"]).resolve(strict=False)
+                if status_payload.get("state_path")
+                else launch_result.state_path,
+                session_output_path=Path(status_payload["session_output_path"]).resolve(strict=False)
+                if status_payload.get("session_output_path")
+                else launch_result.session_output_path,
+                worker_stdout_path=Path(status_payload["worker_stdout_path"]).resolve(strict=False)
+                if status_payload.get("worker_stdout_path")
+                else launch_result.worker_stdout_path,
+                worker_stderr_path=Path(status_payload["worker_stderr_path"]).resolve(strict=False)
+                if status_payload.get("worker_stderr_path")
+                else launch_result.worker_stderr_path,
+            )
+            case_tracker.mark_completed(result)
+            recorder.record(
+                "case",
+                "completed",
+                case_id=case.case_id,
+                software=case.software,
+                variant=case.variant,
+                csv_path=str(result.csv_path),
+                session_id=result.session_id,
+                case_state_path=str(case_tracker.paths.state_path),
+                log_path=str(case_tracker.paths.log_path),
+            )
+            csv_results.append((case, result))
+    finally:
+        if launched:
+            try:
+                operator.close()
+            except Exception:
+                logger.exception("Kdenlive close failed while finalizing the multi-case sequence.")
+                raise
+    return csv_results
+
+
 def run_blender_case(
     *,
     variant: str,
@@ -892,14 +1489,11 @@ def run_pipeline_pass(
 ) -> list[Path]:
     logger.info("Starting pipeline pass '%s'. ai_turbo_enabled=%s", variant, enable_turbo)
     recorder.record("pass", "started", variant=variant, ai_turbo_enabled=enable_turbo)
-    planned_cases = tuple(
-        PipelineCase(
-            case_id=build_case_id(software, variant),
-            software=software,
-            variant=variant,
-            ai_turbo_enabled=enable_turbo,
-        )
-        for software in selected_software
+    planned_cases = build_pipeline_cases(
+        selected_software,
+        [(variant, enable_turbo)],
+        workload_name=workload_name,
+        input_video_path=input_video_path,
     )
     controller = ai_turbo_controller if enable_turbo else None
     csv_paths: list[Path] = []
@@ -912,8 +1506,91 @@ def run_pipeline_pass(
         logger.info("Starting AI Turbo Engine topmost guard for the turbo pass.")
         controller.start_topmost_guard()
     try:
-        for case in planned_cases:
+        case_index = 0
+        while case_index < len(planned_cases):
+            case = planned_cases[case_index]
             software = case.software
+            if (
+                software == "shotcut"
+                and case.sequence_name == SHOTCUT_SEQUENCE_NAME
+                and case.sequence_order == 1
+            ):
+                grouped_cases: list[PipelineCase] = [case]
+                next_index = case_index + 1
+                while (
+                    next_index < len(planned_cases)
+                    and planned_cases[next_index].software == software
+                    and planned_cases[next_index].variant == case.variant
+                    and planned_cases[next_index].sequence_name == case.sequence_name
+                ):
+                    grouped_cases.append(planned_cases[next_index])
+                    next_index += 1
+                sequence_results = run_shotcut_case_sequence(
+                    cases=tuple(grouped_cases),
+                    workload_name=workload_name,
+                    input_video_path=input_video_path,
+                    pipeline_paths=pipeline_paths,
+                    launcher=launcher,
+                    monitor_bridge=monitor_bridge,
+                    ai_turbo_controller=controller,
+                    recorder=recorder,
+                )
+                for grouped_case, result in sequence_results:
+                    if result is not None:
+                        csv_paths.append(result.csv_path)
+                        logger.info(
+                            "Pipeline case finished. software=%s variant=%s csv=%s",
+                            grouped_case.software,
+                            grouped_case.variant,
+                            result.csv_path,
+                        )
+                        continue
+                    completed_csv_path = PipelineCaseTracker(pipeline_paths, grouped_case).completed_csv_path()
+                    if completed_csv_path is not None:
+                        csv_paths.append(completed_csv_path)
+                case_index = next_index
+                continue
+            if (
+                software == "kdenlive"
+                and case.sequence_name == KDENLIVE_SEQUENCE_NAME
+                and case.sequence_order == 1
+            ):
+                grouped_cases: list[PipelineCase] = [case]
+                next_index = case_index + 1
+                while (
+                    next_index < len(planned_cases)
+                    and planned_cases[next_index].software == software
+                    and planned_cases[next_index].variant == case.variant
+                    and planned_cases[next_index].sequence_name == case.sequence_name
+                ):
+                    grouped_cases.append(planned_cases[next_index])
+                    next_index += 1
+                sequence_results = run_kdenlive_case_sequence(
+                    cases=tuple(grouped_cases),
+                    workload_name=workload_name,
+                    input_video_path=input_video_path,
+                    pipeline_paths=pipeline_paths,
+                    launcher=launcher,
+                    monitor_bridge=monitor_bridge,
+                    ai_turbo_controller=controller,
+                    recorder=recorder,
+                )
+                for grouped_case, result in sequence_results:
+                    if result is not None:
+                        csv_paths.append(result.csv_path)
+                        logger.info(
+                            "Pipeline case finished. software=%s variant=%s csv=%s",
+                            grouped_case.software,
+                            grouped_case.variant,
+                            result.csv_path,
+                        )
+                        continue
+                    completed_csv_path = PipelineCaseTracker(pipeline_paths, grouped_case).completed_csv_path()
+                    if completed_csv_path is not None:
+                        csv_paths.append(completed_csv_path)
+                case_index = next_index
+                continue
+
             case_tracker = PipelineCaseTracker(pipeline_paths, case)
             case_tracker.ensure_registered()
             completed_csv_path = case_tracker.completed_csv_path()
@@ -938,6 +1615,7 @@ def run_pipeline_pass(
                     log_path=str(case_tracker.paths.log_path),
                 )
                 csv_paths.append(completed_csv_path)
+                case_index += 1
                 continue
 
             logger.info("Starting pipeline case. software=%s variant=%s", software, variant)
@@ -1053,6 +1731,7 @@ def run_pipeline_pass(
                 case_state_path=str(case_tracker.paths.state_path),
                 log_path=str(case_tracker.paths.log_path),
             )
+            case_index += 1
     except Exception as exc:
         recorder.record("pass", "failed", variant=variant, ai_turbo_enabled=enable_turbo, error=str(exc))
         raise
@@ -1090,7 +1769,12 @@ def run_pipeline(args: argparse.Namespace) -> Path:
     recorder = PipelineRunRecorder(pipeline_paths.root_dir)
     input_video_path = Path(args.input_video).resolve(strict=False) if args.input_video else resolve_input_video(args.workload_name)
     assert input_video_path.exists(), f"Input video does not exist: {input_video_path}"
-    planned_cases = build_pipeline_cases(selected_software, passes)
+    planned_cases = build_pipeline_cases(
+        selected_software,
+        passes,
+        workload_name=args.workload_name,
+        input_video_path=input_video_path,
+    )
     existing_manifest = load_pipeline_manifest(pipeline_paths.root_dir)
     if existing_manifest:
         existing_workload_name = str(existing_manifest.get("workload_name", "") or "")
