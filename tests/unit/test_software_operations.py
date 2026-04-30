@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import software_operations
 
 
@@ -234,6 +235,162 @@ def test_shotcut_resolve_jobs_root_prefers_jobs_dock(monkeypatch) -> None:
     assert resolved is jobs_dock
 
 
+def test_shotcut_resolve_export_root_falls_back_to_main_window(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    window = _DummyWindow("Shotcut", class_name="MainWindow")
+
+    monkeypatch.setattr(operator, "_find_child_by_class_name_if_present", lambda current_window, class_name: None)
+
+    resolved = operator._resolve_export_root(window)
+
+    assert resolved is window
+
+
+def test_shotcut_resolve_export_root_prefers_encode_dock(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    window = _DummyWindow("Shotcut", class_name="MainWindow")
+    encode_dock = _DummyWindow("encode", class_name="EncodeDock")
+
+    monkeypatch.setattr(operator, "_find_child_by_class_name_if_present", lambda current_window, class_name: encode_dock)
+
+    resolved = operator._resolve_export_root(window)
+
+    assert resolved is encode_dock
+
+
+def test_shotcut_export_current_timeline_uses_main_window_when_encode_dock_missing(monkeypatch, tmp_path: Path) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    output_video_path = tmp_path / "out.mp4"
+    output_video_path.write_bytes(b"encoded")
+    initial_window = _DummyWindow("Shotcut", class_name="MainWindow")
+    toolbar = _DummyWindow("toolbar", class_name="QToolBar")
+    steps: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(operator, "_find_child_by_class_name", lambda current_window, class_name: toolbar)
+    monkeypatch.setattr(operator, "_find_child_by_class_name_if_present", lambda current_window, class_name: None)
+    monkeypatch.setattr(operator, "_wait_for_export_ready", lambda current_root: steps.append(("wait_ready", current_root)))
+    monkeypatch.setattr(
+        operator,
+        "_show_output_pane",
+        lambda current_toolbar, current_root: steps.append(("show_output", (current_toolbar, current_root))),
+    )
+    monkeypatch.setattr(operator, "_export_clip", lambda current_root, path: steps.append(("export_clip", (current_root, path))))
+    monkeypatch.setattr(
+        operator,
+        "_begin_background_wait",
+        lambda current_window, phase="", start_waiter=None, start_description=None: (
+            steps.append(("background_wait", current_window)),
+            start_waiter() if start_waiter is not None else None,
+        )[-1],
+    )
+    monkeypatch.setattr(operator, "_wait_for_export_output_start", lambda path: steps.append(("wait_output_start", path)))
+    monkeypatch.setattr(
+        operator,
+        "_wait_for_export_completion",
+        lambda path, jobs_dock=None: steps.append(("wait_complete", (path, jobs_dock))),
+    )
+
+    resolved_window = operator._export_current_timeline(initial_window, output_video_path)
+
+    assert resolved_window is initial_window
+    assert steps == [
+        ("show_output", (toolbar, initial_window)),
+        ("wait_ready", initial_window),
+        ("export_clip", (initial_window, output_video_path)),
+        ("background_wait", initial_window),
+        ("wait_output_start", output_video_path),
+        ("wait_complete", (output_video_path, None)),
+    ]
+
+
+def test_shotcut_show_output_pane_falls_back_to_broader_toolbar_control_types(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    toolbar = _DummyWindow("toolbar", class_name="QToolBar")
+    export_root = _DummyWindow("Shotcut", class_name="MainWindow")
+    toolbar_export = _DummyButton("Export", control_type="Custom")
+    toolbar_export.is_visible = lambda: True
+    export_action = _DummyButton("Export Video/Audio")
+    export_action.is_visible = lambda: True
+    control_type_attempts: list[tuple[str, ...]] = []
+
+    def _wait_for_text_control(root, patterns, *, control_types=(), timeout=15.0, poll_interval=0.25):
+        if root is toolbar:
+            control_type_attempts.append(tuple(control_types))
+            if tuple(control_types) == ("Button",):
+                raise software_operations.UiAutomationError("toolbar export is exposed as Custom")
+            return toolbar_export
+        return export_action
+
+    monkeypatch.setattr(software_operations, "wait_for_text_control", _wait_for_text_control)
+    monkeypatch.setattr(operator, "_dismiss_save_changes_dialog_if_present", lambda owner_window, timeout=0.8: False)
+    monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
+
+    operator._show_output_pane(toolbar, export_root)
+
+    assert control_type_attempts == [("Button",), software_operations.SHOTCUT_TOOLBAR_BUTTON_CONTROL_TYPES]
+    assert toolbar_export.clicked is True
+
+
+def test_shotcut_wait_for_export_action_control_falls_back_to_broader_control_types(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    export_root = _DummyWindow("Shotcut", class_name="MainWindow")
+    export_action = _DummyButton("Export Video/Audio", control_type="Custom")
+    export_action.is_visible = lambda: True
+    control_type_attempts: list[tuple[str, ...]] = []
+
+    def _wait_for_text_control(root, patterns, *, control_types=(), timeout=15.0, poll_interval=0.25):
+        control_type_attempts.append(tuple(control_types))
+        if tuple(control_types) == ("Button",):
+            raise software_operations.UiAutomationError("export action is exposed as Custom")
+        return export_action
+
+    monkeypatch.setattr(software_operations, "wait_for_text_control", _wait_for_text_control)
+
+    resolved = operator._wait_for_export_action_control(export_root, timeout=software_operations.SHOTCUT_CONTROL_TIMEOUT_SECONDS)
+
+    assert resolved is export_action
+    assert control_type_attempts == [("Button",), software_operations.SHOTCUT_EXPORT_ACTION_CONTROL_TYPES]
+
+
+def test_shotcut_show_output_pane_retries_after_save_changes_dialog(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    toolbar = _DummyWindow("toolbar", class_name="QToolBar")
+    export_root = _DummyWindow("Shotcut", class_name="MainWindow")
+    toolbar_export = _DummyButton("Export")
+    toolbar_export.is_visible = lambda: True
+    export_action = _DummyButton("Export Video/Audio")
+    export_action.is_visible = lambda: True
+    steps: list[tuple[str, object]] = []
+    dismiss_results = iter([True, False])
+
+    def _wait_for_text_control(root, patterns, *, control_types=(), timeout=15.0, poll_interval=0.25):
+        if root is toolbar:
+            steps.append(("toolbar_lookup", tuple(control_types)))
+            return toolbar_export
+        steps.append(("export_lookup", tuple(control_types)))
+        return export_action
+
+    monkeypatch.setattr(software_operations, "wait_for_text_control", _wait_for_text_control)
+    monkeypatch.setattr(
+        operator,
+        "_dismiss_save_changes_dialog_if_present",
+        lambda owner_window, timeout=0.8: steps.append(("dismiss_save_changes", timeout)) or next(dismiss_results),
+    )
+    monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
+
+    operator._show_output_pane(toolbar, export_root)
+
+    assert toolbar_export.clicked is True
+    assert [name for name, _ in steps] == [
+        "toolbar_lookup",
+        "dismiss_save_changes",
+        "toolbar_lookup",
+        "dismiss_save_changes",
+        "export_lookup",
+    ]
+
+
 def test_shotcut_assert_task_queued_with_recovery_reuses_current_window(monkeypatch, tmp_path: Path) -> None:
     operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
     window = _DummyWindow("Shotcut", class_name="MainWindow")
@@ -331,6 +488,7 @@ def test_shotcut_perform_prepares_timeline_before_export(monkeypatch, tmp_path: 
             start_waiter() if start_waiter is not None else None,
         )[-1],
     )
+    monkeypatch.setattr(operator, "_wait_for_export_output_start", lambda path: steps.append(("wait_output_start", path)))
     monkeypatch.setattr(operator, "_wait_for_export_completion", lambda path, jobs_dock=None: steps.append(("wait_complete", (path, jobs_dock))))
     monkeypatch.setattr(operator, "close", lambda: steps.append(("close", None)))
 
@@ -340,10 +498,11 @@ def test_shotcut_perform_prepares_timeline_before_export(monkeypatch, tmp_path: 
         "open_input_dialog",
         "fill_file_dialog",
         "append_timeline",
-        "wait_export_ready",
         "show_output_pane",
+        "wait_export_ready",
         "export_clip",
         "minimize",
+        "wait_output_start",
         "wait_complete",
         "close",
     ]
@@ -355,16 +514,10 @@ def test_shotcut_open_input_clip_reconnects_after_dialog_selection(monkeypatch, 
     input_video_path.write_bytes(b"video")
     original_window = _DummyWindow("Shotcut", class_name="MainWindow")
     reopened_window = _DummyWindow("Shotcut", class_name="MainWindow")
-    toolbar = _DummyWindow("toolbar", class_name="QToolBar")
     steps: list[tuple[str, object]] = []
 
     monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
     monkeypatch.setattr(operator, "_dismiss_save_changes_dialog_if_present", lambda current_window, timeout=0.8: False)
-    monkeypatch.setattr(
-        operator,
-        "_find_child_by_class_name",
-        lambda current_window, class_name: steps.append(("find_child", class_name)) or toolbar,
-    )
     monkeypatch.setattr(operator, "_open_input_dialog", lambda current_window, current_toolbar: steps.append(("open_dialog", current_toolbar)))
     monkeypatch.setattr(
         software_operations,
@@ -381,20 +534,18 @@ def test_shotcut_open_input_clip_reconnects_after_dialog_selection(monkeypatch, 
 
     assert resolved_window is reopened_window
     assert [name for name, _ in steps] == [
-        "find_child",
         "open_dialog",
         "fill_dialog",
         "reconnect",
     ]
 
 
-def test_shotcut_open_input_clip_dismisses_save_changes_before_reusing_session(monkeypatch, tmp_path: Path) -> None:
+def test_shotcut_open_input_clip_does_not_probe_save_changes_before_opening_dialog(monkeypatch, tmp_path: Path) -> None:
     operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
     input_video_path = tmp_path / "input.mp4"
     input_video_path.write_bytes(b"video")
     original_window = _DummyWindow("Shotcut", class_name="MainWindow")
     reopened_window = _DummyWindow("Shotcut", class_name="MainWindow")
-    toolbar = _DummyWindow("toolbar", class_name="QToolBar")
     steps: list[tuple[str, object]] = []
 
     monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
@@ -403,11 +554,6 @@ def test_shotcut_open_input_clip_dismisses_save_changes_before_reusing_session(m
         "_dismiss_save_changes_dialog_if_present",
         lambda current_window, timeout=0.8: steps.append(("dismiss_save_changes", timeout)) or True,
     )
-    monkeypatch.setattr(
-        operator,
-        "_find_child_by_class_name",
-        lambda current_window, class_name: steps.append(("find_child", class_name)) or toolbar,
-    )
     monkeypatch.setattr(operator, "_open_input_dialog", lambda current_window, current_toolbar: steps.append(("open_dialog", current_toolbar)))
     monkeypatch.setattr(
         software_operations,
@@ -424,9 +570,6 @@ def test_shotcut_open_input_clip_dismisses_save_changes_before_reusing_session(m
 
     assert resolved_window is reopened_window
     assert [name for name, _ in steps] == [
-        "dismiss_save_changes",
-        "reconnect",
-        "find_child",
         "open_dialog",
         "fill_dialog",
         "reconnect",
@@ -467,6 +610,7 @@ def test_shotcut_export_current_timeline_stays_minimized_while_waiting(monkeypat
             start_waiter() if start_waiter is not None else None,
         )[-1],
     )
+    monkeypatch.setattr(operator, "_wait_for_export_output_start", lambda path: steps.append(("wait_output_start", path)))
     monkeypatch.setattr(
         operator,
         "_wait_for_export_completion",
@@ -479,10 +623,11 @@ def test_shotcut_export_current_timeline_stays_minimized_while_waiting(monkeypat
     assert [name for name, _ in steps] == [
         "find_child",
         "find_child",
-        "wait_ready",
         "show_output",
+        "wait_ready",
         "export_clip",
         "background_wait",
+        "wait_output_start",
         "wait_complete",
     ]
 
@@ -491,6 +636,7 @@ def test_shotcut_dismiss_recovery_dialog_clicks_no(monkeypatch) -> None:
     operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
     owner_window = _DummyWindow("Shotcut", process_id=321)
     dialog = _DummyDialog("Shotcut", process_id=321, texts=["存在自动保存的文件。您想恢复它们吗？"])
+    dialog.handle = 200
     no_button = _DummyButton("否(N)", process_id=321)
     dialog._children.append(no_button)
 
@@ -510,18 +656,10 @@ def test_shotcut_dismiss_recovery_dialog_clicks_no(monkeypatch) -> None:
 def test_shotcut_open_input_dialog_retries_after_recovery_prompt(monkeypatch) -> None:
     operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
     main_window = _DummyWindow("Shotcut", class_name="MainWindow")
-    toolbar = _DummyWindow("toolbar", class_name="QToolBar")
     window = _DummyWindow("Shotcut", class_name="MainWindow")
-    open_button = _DummyButton("Open File")
-    open_button.is_visible = lambda: True
     steps: list[tuple[str, object]] = []
     attempts = {"count": 0}
 
-    monkeypatch.setattr(
-        software_operations,
-        "wait_for_text_control",
-        lambda *args, **kwargs: open_button,
-    )
     monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
     hotkeys: list[str] = []
@@ -541,23 +679,18 @@ def test_shotcut_open_input_dialog_retries_after_recovery_prompt(monkeypatch) ->
         lambda owner_window, timeout=0.4: steps.append(("dismiss_recovery", timeout)) or (attempts["count"] == 1),
     )
     monkeypatch.setattr(operator, "_connect_main_window", lambda timeout=8.0: steps.append(("reconnect", timeout)) or window)
-    monkeypatch.setattr(
-        operator,
-        "_find_child_by_class_name",
-        lambda current_window, class_name: steps.append(("find_child", class_name)) or toolbar,
-    )
 
-    operator._open_input_dialog(main_window, toolbar)
+    operator._open_input_dialog(main_window)
 
     assert attempts["count"] == 3
-    assert open_button.clicked is True
-    assert hotkeys == ["^o"]
+    assert hotkeys == ["^o", "^o", "^o"]
     assert [name for name, _ in steps] == [
         "dismiss_recovery",
         "dismiss_recovery",
+        "reconnect",
+        "dismiss_recovery",
         "dismiss_recovery",
         "reconnect",
-        "find_child",
         "dismiss_recovery",
     ]
 
@@ -566,37 +699,42 @@ def test_shotcut_close_dismisses_save_prompt_with_no(monkeypatch) -> None:
     operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
     main_window = _DummyWindow("Shotcut", process_id=321)
     main_window.handle = 100
-    dialog = _DummyDialog("Shotcut", process_id=321, texts=["项目已被修改", "你想保存你的修改吗？"])
-    dialog.handle = 200
-    no_button = _DummyButton("否(N)", process_id=321)
-    dialog._children.append(no_button)
-    generic_dismiss_calls: list[tuple[float, object]] = []
     hotkeys: list[str] = []
-    close_requests: list[object] = []
 
     monkeypatch.setattr(operator, "_connect_main_window", lambda timeout=2.0: main_window)
-    dialog_snapshots = [[dialog], []]
-    monkeypatch.setattr(
-        operator,
-        "_iter_process_top_level_windows",
-        lambda process_id: dialog_snapshots.pop(0) if dialog_snapshots else [],
-    )
     monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
     monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(software_operations, "send_hotkey", lambda keys: hotkeys.append(keys))
-    monkeypatch.setattr(software_operations, "request_window_close", lambda window: close_requests.append(window) or True)
+    wait_results = iter([False, True])
     monkeypatch.setattr(
-        software_operations,
-        "dismiss_close_prompts",
-        lambda timeout=2.0, owner_window=None: generic_dismiss_calls.append((timeout, owner_window)),
+        operator,
+        "_wait_for_process_windows_to_close",
+        lambda process_id, timeout=3.0: next(wait_results),
     )
 
     operator.close()
 
-    assert no_button.clicked is True
-    assert hotkeys == [software_operations.SHOTCUT_CLOSE_HOTKEY]
-    assert close_requests == [main_window]
-    assert generic_dismiss_calls == [(1.5, main_window)]
+    assert hotkeys[0] == software_operations.SHOTCUT_CLOSE_HOTKEY
+    assert hotkeys[1:] == list(software_operations.SHOTCUT_DONT_SAVE_DIRECT_KEYS)
+
+
+def test_shotcut_close_raises_when_ui_remains(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    main_window = _DummyWindow("Shotcut", process_id=321)
+    main_window.handle = 100
+    hotkeys: list[str] = []
+
+    monkeypatch.setattr(operator, "_connect_main_window", lambda timeout=2.0: main_window)
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(software_operations, "send_hotkey", lambda keys: hotkeys.append(keys))
+    monkeypatch.setattr(operator, "_wait_for_process_windows_to_close", lambda process_id, timeout=3.0: False)
+
+    with pytest.raises(AssertionError, match="Shotcut still exists after sending Alt\\+F4 and 'n'\\."):
+        operator.close()
+
+    assert hotkeys[0] == software_operations.SHOTCUT_CLOSE_HOTKEY
+    assert hotkeys[1:] == list(software_operations.SHOTCUT_DONT_SAVE_DIRECT_KEYS)
 
 
 def test_shotcut_dismiss_save_prompt_falls_back_to_keyboard_no(monkeypatch) -> None:
@@ -630,6 +768,22 @@ def test_shotcut_dismiss_save_prompt_falls_back_to_keyboard_no(monkeypatch) -> N
     assert operator._dismiss_save_changes_dialog_if_present(owner_window, timeout=0.2) is True
     assert hotkeys == list(software_operations.SHOTCUT_DONT_SAVE_DIRECT_KEYS)
     assert generic_dismiss_calls == [(0.8, dialog)]
+
+
+def test_shotcut_dismiss_save_prompt_uses_owner_window_when_dialog_is_embedded(monkeypatch) -> None:
+    operator = software_operations.ShotcutOperator(software_operations.OPERATION_PROFILES["shotcut"])
+    owner_window = _DummyWindow("Shotcut", process_id=321)
+    owner_window.handle = 100
+    no_button = _DummyButton("No", process_id=321, control_type="Custom")
+    owner_window._children = [no_button]
+
+    monkeypatch.setattr(operator, "_iter_process_top_level_windows", lambda process_id: [])
+    monkeypatch.setattr(operator, "_dialog_matches", lambda current_dialog, text_patterns=(): current_dialog is owner_window)
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
+
+    assert operator._dismiss_save_changes_dialog_if_present(owner_window, timeout=0.2) is True
+    assert no_button.clicked is True
 
 
 def test_avidemux_open_input_uses_standard_file_dialog(monkeypatch, tmp_path: Path) -> None:
@@ -1528,6 +1682,7 @@ def test_kdenlive_open_input_clip_imports_and_selects_requested_video(monkeypatc
     assert resolved_window is reconnected_window
     assert operator._main_window is reconnected_window
     assert [name for name, _ in steps] == [
+        "reconnect",
         "open_import_dialog",
         "fill_file_dialog",
         "reconnect",
@@ -1567,6 +1722,7 @@ def test_kdenlive_open_input_clip_dismisses_save_dialog_before_next_import(monke
     assert resolved_window is reconnected_window
     assert operator._main_window is reconnected_window
     assert [name for name, _ in steps] == [
+        "reconnect",
         "dismiss_save",
         "reconnect",
         "open_import_dialog",
@@ -1585,8 +1741,8 @@ def test_kdenlive_render_current_timeline_minimizes_and_waits(monkeypatch, tmp_p
     steps: list[tuple[str, object]] = []
 
     monkeypatch.setattr(operator, "_open_render_dialog", lambda window: steps.append(("open_render_dialog", window)) or render_dialog)
+    monkeypatch.setattr(operator, "_show_render_project_tab", lambda dialog: steps.append(("show_render_project", dialog)))
     monkeypatch.setattr(operator, "_set_render_output_path", lambda dialog, path: steps.append(("set_render_output", path)))
-    monkeypatch.setattr(operator, "_show_job_queue_tab", lambda dialog: steps.append(("show_job_queue", dialog)))
     monkeypatch.setattr(operator, "_start_render", lambda dialog: steps.append(("start_render", dialog)))
     monkeypatch.setattr(
         operator,
@@ -1609,8 +1765,8 @@ def test_kdenlive_render_current_timeline_minimizes_and_waits(monkeypatch, tmp_p
     assert operator._main_window is current_window
     assert [name for name, _ in steps] == [
         "open_render_dialog",
+        "show_render_project",
         "set_render_output",
-        "show_job_queue",
         "start_render",
         "minimize",
         "confirm_transition",
@@ -1629,11 +1785,19 @@ def test_kdenlive_close_render_dialog_only_preserves_main_window(monkeypatch) ->
     monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
     monkeypatch.setattr(software_operations, "find_text_control", lambda *args, **kwargs: _DummyButton())
     monkeypatch.setattr(software_operations, "click_control", lambda control, post_click_sleep=0.5: steps.append(("click_close", control)))
+    monkeypatch.setattr(software_operations, "send_hotkey", lambda keys: steps.append(("hotkey", keys)))
     monkeypatch.setattr(
         operator,
         "_dismiss_kdenlive_save_dialog_if_present",
         lambda owner_window, timeout=2.0: steps.append(("dismiss_save", timeout, owner_window)) or True,
     )
+    monkeypatch.setattr(
+        operator,
+        "_dismiss_profile_switch_prompt_if_present",
+        lambda window: steps.append(("dismiss_profile", window)) or False,
+    )
+    monkeypatch.setattr(operator, "_show_render_project_tab", lambda dialog: steps.append(("show_render_project", dialog)))
+    monkeypatch.setattr(operator, "_render_dialog_is_still_present", lambda dialog: False)
     monkeypatch.setattr(
         software_operations,
         "dismiss_close_prompts",
@@ -1646,12 +1810,42 @@ def test_kdenlive_close_render_dialog_only_preserves_main_window(monkeypatch) ->
     assert operator._render_dialog is None
     assert operator._main_window is main_window
     assert [item[0] for item in steps] == [
+        "dismiss_profile",
+        "show_render_project",
         "click_close",
+        "dismiss_profile",
         "dismiss_save",
         "dismiss_prompts",
         "dismiss_save",
         "reconnect",
     ]
+
+
+def test_kdenlive_show_render_project_tab_clicks_popup_tab(monkeypatch) -> None:
+    operator = software_operations.KdenliveOperator(software_operations.OPERATION_PROFILES["kdenlive"])
+    render_dialog = _DummyWindow("Rendering - Kdenlive")
+    popup_window = _DummyWindow("Rendering - Kdenlive")
+    render_project_tab = _DummyButton("Render Project", control_type="TabItem")
+    steps: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(render_dialog, "top_level_parent", lambda: popup_window, raising=False)
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda window, keep_topmost=False: steps.append(("front", window)))
+    monkeypatch.setattr(
+        software_operations,
+        "find_text_control",
+        lambda root, patterns, control_types=(): render_project_tab if root is render_dialog else (_ for _ in ()).throw(
+            AssertionError("unexpected root")
+        ),
+    )
+    monkeypatch.setattr(
+        software_operations,
+        "click_control",
+        lambda control, post_click_sleep=0.3: steps.append(("click", control)),
+    )
+
+    operator._show_render_project_tab(render_dialog)
+
+    assert steps == [("front", popup_window), ("click", render_project_tab)]
 
 
 def test_kdenlive_close_dismisses_save_prompt_after_render_window_close(monkeypatch) -> None:
@@ -1678,6 +1872,8 @@ def test_kdenlive_close_dismisses_save_prompt_after_render_window_close(monkeypa
         lambda owner_window, timeout=3.0: dismiss_calls.append(("targeted", timeout, owner_window)) or True,
     )
     monkeypatch.setattr(operator, "_connect_main_window", lambda timeout=6.0: main_window)
+    monkeypatch.setattr(operator, "_render_dialog_is_still_present", lambda dialog: False)
+    monkeypatch.setattr(software_operations, "send_hotkey", lambda keys: None)
     monkeypatch.setattr(operator, "_wait_for_main_window_to_close", lambda timeout=3.0: True)
 
     operator.close()
@@ -1688,6 +1884,22 @@ def test_kdenlive_close_dismisses_save_prompt_after_render_window_close(monkeypa
     assert any(call[0] == "generic" and call[1] == 1.5 for call in dismiss_calls)
     assert any(call[0] == "targeted" and call[1] == 3.0 for call in dismiss_calls)
     assert request_close_calls == [main_window]
+
+
+def test_kdenlive_resolve_render_dialog_tracks_embedded_render_window(monkeypatch) -> None:
+    operator = software_operations.KdenliveOperator(software_operations.OPERATION_PROFILES["kdenlive"])
+    main_window = _DummyWindow("Kdenlive")
+    render_container = _DummyWindow("Rendering - Kdenlive", control_type="Window")
+    main_window.handle = 100
+    render_container.handle = 100
+    operator._main_window = main_window
+
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(render_container, "top_level_parent", lambda: main_window, raising=False)
+
+    operator._resolve_render_dialog_top_level(render_container)
+
+    assert operator._render_dialog is render_container
 
 
 def test_kdenlive_dismiss_save_dialog_clicks_dont_save(monkeypatch) -> None:
@@ -1860,6 +2072,8 @@ def test_kdenlive_open_import_dialog_uses_extended_confirm_patterns(monkeypatch)
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(operator, "_dismiss_recovery_dialog_if_present", lambda owner_window, timeout=0.8: False)
+    monkeypatch.setattr(operator, "_connect_main_window", lambda timeout=6.0: _DummyWindow("Kdenlive"))
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
     monkeypatch.setattr(software_operations, "wait_for_text_control", lambda *args, **kwargs: button)
     monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
@@ -1874,22 +2088,50 @@ def test_kdenlive_open_import_dialog_uses_extended_confirm_patterns(monkeypatch)
     assert captured["confirm_patterns"] == software_operations.KDENLIVE_OPEN_CONFIRM_PATTERNS
 
 
-def test_kdenlive_start_render_checks_kdenlive_specific_overwrite_dialog_when_generic_helper_misses(monkeypatch) -> None:
+def test_kdenlive_confirm_render_transition_checks_kdenlive_specific_overwrite_dialog_when_generic_helper_misses(monkeypatch) -> None:
     operator = software_operations.KdenliveOperator(software_operations.OPERATION_PROFILES["kdenlive"])
-    render_button = _DummyButton("Render to File")
     render_dialog = _DummyWindow("Rendering - Kdenlive", process_id=321)
     helper_calls: list[tuple[object, float]] = []
 
-    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
-    monkeypatch.setattr(operator, "_find_render_to_file_button", lambda current_dialog: render_button)
     monkeypatch.setattr(software_operations, "accept_overwrite_confirmation", lambda *args, **kwargs: False)
     monkeypatch.setattr(
         operator,
         "_accept_kdenlive_overwrite_dialog_if_present",
-        lambda owner_window, timeout=2.5: helper_calls.append((owner_window, timeout)) or True,
+        lambda owner_window, timeout=0.8: helper_calls.append((owner_window, timeout)) or True,
     )
 
-    operator._start_render(render_dialog)
+    operator._confirm_render_transition_after_minimizing(render_dialog)
 
-    assert render_button.clicked is True
-    assert helper_calls == [(render_dialog, 2.5)]
+    assert helper_calls == [(render_dialog, 0.8)]
+
+
+def test_kdenlive_open_import_dialog_falls_back_to_ctrl_o(monkeypatch) -> None:
+    operator = software_operations.KdenliveOperator(software_operations.OPERATION_PROFILES["kdenlive"])
+    captured: dict[str, object] = {}
+    hotkeys: list[str] = []
+
+    monkeypatch.setattr(operator, "_dismiss_recovery_dialog_if_present", lambda owner_window, timeout=0.8: False)
+    monkeypatch.setattr(operator, "_connect_main_window", lambda timeout=6.0: _DummyWindow("Kdenlive"))
+    monkeypatch.setattr(software_operations, "bring_window_to_front", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        software_operations,
+        "wait_for_text_control",
+        lambda *args, **kwargs: (_ for _ in ()).throw(software_operations.UiAutomationError("toolbar missing")),
+    )
+    monkeypatch.setattr(
+        software_operations,
+        "click_text_control",
+        lambda *args, **kwargs: (_ for _ in ()).throw(software_operations.UiAutomationError("menu missing")),
+    )
+    monkeypatch.setattr(software_operations.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(software_operations, "send_hotkey", lambda keys: hotkeys.append(keys))
+    monkeypatch.setattr(
+        software_operations,
+        "wait_for_file_dialog",
+        lambda **kwargs: captured.update(kwargs) or object(),
+    )
+
+    operator._open_import_dialog(_DummyWindow("Kdenlive"))
+
+    assert hotkeys == ["^o"]
+    assert captured["confirm_patterns"] == software_operations.KDENLIVE_OPEN_CONFIRM_PATTERNS

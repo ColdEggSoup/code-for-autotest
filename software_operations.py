@@ -65,6 +65,13 @@ SHOTCUT_SAVE_CONFIRM_PATTERNS = (r"^\u4fdd\u5b58", r"^Save")
 SHOTCUT_TASK_TIME_PATTERN = r"^\d{2}:\d{2}:\d{2}$"
 SHOTCUT_OPEN_BUTTON_PATTERNS = (r"^\u6253\u5f00\u6587\u4ef6$", r"^Open File$")
 SHOTCUT_OUTPUT_BUTTON_PATTERNS = (r"^\u8f93\u51fa$", r"^Export$")
+SHOTCUT_EXPORT_ACTION_PATTERNS = (
+    r"^Export Video/Audio$",
+    r"^Export File$",
+    r"^\u8f93\u51fa(?:\u89c6\u9891/\u97f3\u9891)?$",
+)
+SHOTCUT_TOOLBAR_BUTTON_CONTROL_TYPES = ("Button", "Custom", "Text", "Pane", "Group")
+SHOTCUT_EXPORT_ACTION_CONTROL_TYPES = ("Button", "Custom", "Text", "Pane", "Group")
 SHOTCUT_TASKS_BUTTON_PATTERNS = (r"^\u4efb\u52a1$", r"^Jobs$")
 SHOTCUT_PAUSE_QUEUE_PATTERNS = (r"^\u6682\u505c\u961f\u5217$", r"^Pause Queue$")
 SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS = (
@@ -88,13 +95,14 @@ SHOTCUT_RECOVERY_DISMISS_PATTERNS = (
     r"^Do not recover(?:\([A-Z]\))?$",
 )
 SHOTCUT_RECOVERY_DISMISS_KEY = "%n"
-SHOTCUT_DONT_SAVE_DIRECT_KEYS = ("%n", "n")
+SHOTCUT_DONT_SAVE_DIRECT_KEYS = ("n",)
 SHOTCUT_DONT_SAVE_PATTERNS = (
     r"^No(?:\([A-Z]\))?$",
     r"^\u5426(?:\([A-Z]\))?$",
     r"^Don't Save(?:\([A-Z]\))?$",
     r"^Discard(?:\([A-Z]\))?$",
 )
+SHOTCUT_DISMISS_BUTTON_CONTROL_TYPES = ("Button", "Text", "Pane", "Group", "Custom")
 SHOTCUT_APPEND_TO_TIMELINE_SHORTCUT = "a"
 SHOTCUT_CLOSE_HOTKEY = "%{F4}"
 
@@ -105,6 +113,7 @@ SHOTCUT_EXPORT_READY_TIMEOUT_SECONDS = 8.0
 SHOTCUT_EXPORT_BUTTON_RETRY_COUNT = 2
 SHOTCUT_EXPORT_BUTTON_POST_CLICK_SECONDS = 0.5
 SHOTCUT_JOBS_TIMEOUT_SECONDS = 6.0
+SHOTCUT_OPEN_INPUT_TIMEOUT_SECONDS = 30.0
 SHOTCUT_EXPORT_POLL_SECONDS = 1.0
 SHOTCUT_SAVE_DIALOG_OVERWRITE_TIMEOUT_SECONDS = 0.5
 WAIT_PROGRESS_LOG_INTERVAL_SECONDS = 15.0
@@ -310,6 +319,10 @@ KDENLIVE_RENDER_WINDOW_PATTERNS = (
     r"^\u6e32\u67d3(?:.*Kdenlive)?$",
 )
 KDENLIVE_JOB_QUEUE_TAB_PATTERNS = (r"^Job Queue$", r"^\u4efb\u52a1\u961f\u5217$")
+KDENLIVE_RENDER_PROJECT_TAB_PATTERNS = (
+    r"^Render Project$",
+    r"^\u6e32\u67d3\u9879\u76ee$",
+)
 KDENLIVE_ACTIVE_RENDER_PATTERNS = (
     r"^Remaining time\b.*$",
     r".*\(frame \d+ @ \d+(?:\.\d+)? fps\).*$",
@@ -558,20 +571,24 @@ class SoftwareOperator:
         dismiss_close_prompts(owner_window=window)
 
     def _minimize_window_during_wait(self, window, *, phase: str) -> None:
-        try:
-            top_level = window.top_level_parent()
-        except Exception:
-            top_level = window
         logger.info("Minimizing %s during the %s wait.", self.profile.software, phase)
         try:
-            minimize_window(top_level)
+            minimize_window(window)
         except Exception as exc:
-            logger.info(
-                "Could not minimize %s during the %s wait: %s",
-                self.profile.software,
-                phase,
-                exc,
-            )
+            logger.info("Direct minimize attempt for %s during the %s wait failed: %s", self.profile.software, phase, exc)
+            try:
+                top_level = window.top_level_parent()
+            except Exception:
+                top_level = window
+            try:
+                minimize_window(top_level)
+            except Exception as fallback_exc:
+                logger.info(
+                    "Could not minimize %s during the %s wait: %s",
+                    self.profile.software,
+                    phase,
+                    fallback_exc,
+                )
 
     def _begin_background_wait(
         self,
@@ -649,6 +666,18 @@ class ShotcutOperator(SoftwareOperator):
         except Exception:
             return ""
 
+    def _is_enabled(self, wrapper) -> bool | None:
+        readers = (
+            lambda: bool(wrapper.is_enabled()),
+            lambda: bool(getattr(wrapper.element_info, "enabled")),
+        )
+        for reader in readers:
+            try:
+                return reader()
+            except Exception:
+                continue
+        return None
+
     def _process_id(self, window) -> int | None:
         try:
             process_id = getattr(getattr(window, "element_info", None), "process_id", None)
@@ -689,28 +718,107 @@ class ShotcutOperator(SoftwareOperator):
                 return True
         return False
 
-    def _dismiss_save_changes_dialog_if_present(self, owner_window, *, timeout: float = 3.0) -> bool:
+    def _window_handle_exists(self, handle: int | None) -> bool:
+        if not handle:
+            return False
+        try:
+            return bool(ctypes.windll.user32.IsWindow(handle))
+        except Exception:
+            return True
+
+    def _dialog_matches_limited(
+        self,
+        dialog,
+        *,
+        text_patterns: tuple[str, ...],
+        max_descendants: int = 40,
+    ) -> bool:
+        text = self._wrapper_text(dialog)
+        if text and self._matches_patterns(text, text_patterns):
+            return True
+        try:
+            children = dialog.children()
+        except Exception:
+            children = []
+        for child in children:
+            text = self._wrapper_text(child)
+            if text and self._matches_patterns(text, text_patterns):
+                return True
+        checked = 0
+        try:
+            descendants = dialog.descendants()
+        except Exception:
+            descendants = []
+        for child in descendants:
+            text = self._wrapper_text(child)
+            if text and self._matches_patterns(text, text_patterns):
+                return True
+            checked += 1
+            if checked >= max_descendants:
+                break
+        return False
+
+    def _resolve_save_changes_dialog(self, owner_window):
         process_id = self._process_id(owner_window)
         owner_handle = getattr(owner_window, "handle", None)
+
+        try:
+            foreground = get_foreground_window()
+        except Exception:
+            foreground = None
+        if foreground is not None and self._process_id(foreground) == process_id:
+            foreground_handle = getattr(foreground, "handle", None)
+            if foreground_handle != owner_handle and self._dialog_matches(
+                foreground,
+                text_patterns=SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS,
+            ):
+                return foreground
+
+        for candidate in self._iter_process_top_level_windows(process_id):
+            candidate_handle = getattr(candidate, "handle", None)
+            if owner_handle is not None and candidate_handle == owner_handle:
+                continue
+            if not self._dialog_matches(candidate, text_patterns=SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS):
+                continue
+            return candidate
+
+        owner_window_matches = self._dialog_matches(
+            owner_window,
+            text_patterns=SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS,
+        )
+        if not owner_window_matches and self._window_handle_exists(owner_handle):
+            owner_window_matches = self._dialog_matches_limited(
+                owner_window,
+                text_patterns=SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS,
+            )
+        if owner_window_matches:
+            return owner_window
+        return None
+
+    def _dismiss_save_changes_dialog_if_present(self, owner_window, *, timeout: float = 3.0) -> bool:
         deadline = time.monotonic() + timeout
         dismissed = False
         while time.monotonic() < deadline:
-            dialog = None
-            for candidate in self._iter_process_top_level_windows(process_id):
-                if owner_handle is not None and getattr(candidate, "handle", None) == owner_handle:
-                    continue
-                if not self._dialog_matches(candidate, text_patterns=SHOTCUT_SAVE_CHANGES_TEXT_PATTERNS):
-                    continue
-                dialog = candidate
-                break
+            dialog = self._resolve_save_changes_dialog(owner_window)
             if dialog is None:
                 return dismissed
             try:
-                bring_window_to_front(dialog, keep_topmost=False)
+                foreground = get_foreground_window()
             except Exception:
-                pass
+                foreground = None
+            if foreground is None or getattr(foreground, "handle", None) != getattr(dialog, "handle", None):
+                try:
+                    bring_window_to_front(dialog, keep_topmost=False)
+                except Exception:
+                    pass
+            if getattr(dialog, "handle", None) == getattr(owner_window, "handle", None):
+                logger.info("Shotcut save-changes prompt appears embedded in the main window.")
             try:
-                button = find_text_control(dialog, SHOTCUT_DONT_SAVE_PATTERNS, control_types=("Button",))
+                button = find_text_control(
+                    dialog,
+                    SHOTCUT_DONT_SAVE_PATTERNS,
+                    control_types=SHOTCUT_DISMISS_BUTTON_CONTROL_TYPES,
+                )
             except Exception:
                 logger.info(
                     "Shotcut save-changes dialog was found, but a discard-style button was not directly exposed. "
@@ -722,7 +830,7 @@ class ShotcutOperator(SoftwareOperator):
                         send_hotkey(key)
                     except Exception:
                         pass
-                dismiss_close_prompts(timeout=0.8, owner_window=dialog)
+                dismiss_close_prompts(timeout=0.4 if getattr(dialog, "handle", None) == getattr(owner_window, "handle", None) else 0.8, owner_window=dialog)
                 time.sleep(0.2)
                 dismissed = True
                 continue
@@ -746,17 +854,33 @@ class ShotcutOperator(SoftwareOperator):
 
     def _dismiss_recovery_dialog_if_present(self, owner_window, *, timeout: float = 1.5) -> bool:
         process_id = self._process_id(owner_window)
+        owner_handle = getattr(owner_window, "handle", None)
         deadline = time.monotonic() + timeout
         dismissed = False
         while time.monotonic() < deadline:
             dialog = None
-            for candidate in self._iter_process_top_level_windows(process_id):
-                if not self._dialog_matches(candidate, text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS):
-                    continue
-                dialog = candidate
-                break
+            try:
+                foreground = get_foreground_window()
+            except Exception:
+                foreground = None
+            if foreground is not None and self._process_id(foreground) == process_id:
+                foreground_handle = getattr(foreground, "handle", None)
+                if foreground_handle != owner_handle and self._dialog_matches_limited(
+                    foreground,
+                    text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS,
+                ):
+                    dialog = foreground
             if dialog is None:
-                if self._dialog_matches(owner_window, text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS):
+                for candidate in self._iter_process_top_level_windows(process_id):
+                    candidate_handle = getattr(candidate, "handle", None)
+                    if owner_handle is not None and candidate_handle == owner_handle:
+                        continue
+                    if not self._dialog_matches_limited(candidate, text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS):
+                        continue
+                    dialog = candidate
+                    break
+            if dialog is None:
+                if self._dialog_matches_limited(owner_window, text_patterns=SHOTCUT_RECOVERY_TEXT_PATTERNS):
                     dialog = owner_window
                 else:
                     return dismissed
@@ -795,29 +919,71 @@ class ShotcutOperator(SoftwareOperator):
         logger.info("Appending the imported Shotcut clip to the timeline before export.")
         self._append_selected_clip_to_timeline(window)
         self._export_current_timeline(window, output_video_path)
-        self.close()
+        self._close_window = window
+        try:
+            self.close()
+        finally:
+            self._close_window = None
 
-    def close(self) -> None:
+    def _send_shotcut_dont_save_shortcuts(self) -> None:
+        for key in SHOTCUT_DONT_SAVE_DIRECT_KEYS:
+            try:
+                logger.info("Sending Shotcut discard shortcut during close: %s", key)
+                send_hotkey(key)
+            except Exception:
+                pass
+            time.sleep(0.1)
+
+    def close(self, window=None) -> None:
         logger.info("Closing Shotcut.")
-        try:
-            window = self._connect_main_window(timeout=2.0)
-        except UiAutomationError:
-            logger.info("Shotcut window is already closed.")
-            return
+        if window is None:
+            window = getattr(self, "_close_window", None)
+        if window is None:
+            try:
+                window = self._connect_main_window(timeout=2.0)
+            except UiAutomationError:
+                logger.info("Shotcut window is already closed.")
+                return
+        process_id = self._process_id(window)
         bring_window_to_front(window, keep_topmost=False)
-        self._dismiss_save_changes_dialog_if_present(window, timeout=0.5)
-        try:
-            logger.info("Requesting Shotcut shutdown with hotkey: %s", SHOTCUT_CLOSE_HOTKEY)
-            send_hotkey(SHOTCUT_CLOSE_HOTKEY)
-        except Exception as exc:
-            logger.info("Shotcut close hotkey raised %s. Falling back to WM_CLOSE.", exc)
-        self._dismiss_save_changes_dialog_if_present(window, timeout=1.5)
-        try:
-            request_window_close(window)
-        except Exception as exc:
-            logger.info("Shotcut WM_CLOSE fallback raised %s.", exc)
-        self._dismiss_save_changes_dialog_if_present(window, timeout=3.0)
-        dismiss_close_prompts(timeout=1.5, owner_window=window)
+        logger.info("Requesting Shotcut shutdown with hotkey: %s", SHOTCUT_CLOSE_HOTKEY)
+        send_hotkey(SHOTCUT_CLOSE_HOTKEY)
+        time.sleep(0.2)
+        self._send_shotcut_dont_save_shortcuts()
+        if self._complete_close_attempt(window, process_id=process_id, reason="the close hotkey", timeout=3.0):
+            return
+        raise AssertionError("Shotcut still exists after sending Alt+F4 and 'n'.")
+
+    def _complete_close_attempt(self, window, *, process_id: int | None, reason: str, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._wait_for_process_windows_to_close(process_id, timeout=0.15):
+                logger.info("Shotcut closed successfully after %s.", reason)
+                return True
+            time.sleep(0.05)
+        return False
+
+    def _wait_for_process_windows_to_close(self, process_id: int | None, *, timeout: float = 3.0) -> bool:
+        if process_id is None:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    self._connect_main_window(timeout=0.2)
+                except Exception:
+                    return True
+                time.sleep(0.2)
+            return False
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                windows = self._iter_process_top_level_windows(process_id)
+            except Exception:
+                windows = []
+            if not windows:
+                return True
+            time.sleep(0.2)
+        return False
 
     def _find_child_by_class_name(self, window, class_name: str):
         logger.info("Locating Shotcut child control by class name: %s", class_name)
@@ -868,20 +1034,44 @@ class ShotcutOperator(SoftwareOperator):
         logger.info("Using the Shotcut main window as the Jobs search root.")
         return window
 
+    def _resolve_export_root(self, window):
+        encode_dock = self._find_child_by_class_name_if_present(window, "EncodeDock")
+        if encode_dock is not None:
+            return encode_dock
+        logger.info("Using the Shotcut main window as the export control search root.")
+        return window
+
+    def _wait_for_export_action_control(self, root, *, timeout: float):
+        export_button = None
+        last_error: UiAutomationError | None = None
+        for control_types in (("Button",), SHOTCUT_EXPORT_ACTION_CONTROL_TYPES):
+            try:
+                export_button = wait_for_text_control(
+                    root,
+                    SHOTCUT_EXPORT_ACTION_PATTERNS,
+                    control_types=control_types,
+                    timeout=timeout,
+                )
+                break
+            except UiAutomationError as exc:
+                last_error = exc
+                logger.info(
+                    "Shotcut export action button was not exposed with control types %s. details=%s",
+                    control_types,
+                    exc,
+                )
+        if export_button is None:
+            raise AssertionError("Shotcut export action button could not be located.") from last_error
+        return export_button
+
     def _append_selected_clip_to_timeline(self, window) -> None:
         logger.info("Appending the selected Shotcut clip to the timeline with shortcut '%s'.", SHOTCUT_APPEND_TO_TIMELINE_SHORTCUT.upper())
         bring_window_to_front(window, keep_topmost=False)
         send_hotkey(SHOTCUT_APPEND_TO_TIMELINE_SHORTCUT)
 
     def _open_input_clip(self, window, input_video_path: Path):
-        if self._dismiss_save_changes_dialog_if_present(window, timeout=0.8):
-            logger.info("Shotcut save-changes dialog was blocking the next import. Reconnecting to the main window.")
-            window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
-            bring_window_to_front(window, keep_topmost=False)
-        logger.info("Locating Shotcut toolbar.")
-        toolbar = self._find_child_by_class_name(window, "QToolBar")
         logger.info("Opening Shotcut input dialog.")
-        self._open_input_dialog(window, toolbar)
+        self._open_input_dialog(window, None)
         logger.info("Filling Shotcut input dialog with selected video.")
         fill_file_dialog(input_video_path, dialog_patterns=OPEN_DIALOG_PATTERNS, must_exist=True)
         logger.info("Reconnecting to Shotcut after input selection.")
@@ -893,16 +1083,18 @@ class ShotcutOperator(SoftwareOperator):
         logger.info("Locating Shotcut controls for export.")
         bring_window_to_front(window, keep_topmost=False)
         toolbar = self._find_child_by_class_name(window, "QToolBar")
-        encode_dock = self._find_child_by_class_name(window, "EncodeDock")
-        logger.info("Waiting for Shotcut export controls to become ready.")
-        self._wait_for_export_ready(encode_dock)
+        export_root = self._resolve_export_root(window)
         logger.info("Opening Shotcut output pane.")
-        self._show_output_pane(toolbar, encode_dock)
+        self._show_output_pane(toolbar, export_root)
+        logger.info("Waiting for Shotcut export controls to become ready.")
+        self._wait_for_export_ready(export_root)
         logger.info("Opening Shotcut export save dialog.")
-        self._export_clip(encode_dock, output_video_path)
+        self._export_clip(export_root, output_video_path)
         self._begin_background_wait(
             window,
             phase="export",
+            start_waiter=lambda: self._wait_for_export_output_start(output_video_path),
+            start_description="the Shotcut export output",
         )
         logger.info("Waiting for Shotcut export completion.")
         self._wait_for_export_completion(output_video_path)
@@ -913,84 +1105,48 @@ class ShotcutOperator(SoftwareOperator):
         dialog = wait_for_file_dialog(dialog_patterns=OPEN_DIALOG_PATTERNS, timeout=timeout)
         assert dialog is not None, "Shotcut did not open the input file dialog."
 
-    def _open_input_dialog(self, window, toolbar) -> None:
+    def _open_input_dialog(self, window, toolbar=None) -> None:
         last_error: Exception | None = None
         current_window = window
-        current_toolbar = toolbar
+        deadline = time.monotonic() + SHOTCUT_OPEN_INPUT_TIMEOUT_SECONDS
         for attempt_index in range(3):
-            if self._dismiss_save_changes_dialog_if_present(current_window, timeout=0.4):
-                logger.info(
-                    "Shotcut save-changes dialog interrupted the next import. Reconnecting before retrying the open-file flow."
-                )
-                try:
-                    current_window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
-                    current_toolbar = self._find_child_by_class_name(current_window, "QToolBar")
-                except Exception:
-                    pass
-            self._dismiss_recovery_dialog_if_present(current_window, timeout=0.4)
-            logger.info("Waiting for Shotcut 'Open File' button.")
-            open_button = wait_for_text_control(
-                current_toolbar,
-                SHOTCUT_OPEN_BUTTON_PATTERNS,
-                control_types=("Button",),
-                timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
-            )
-            assert open_button.is_visible(), "Shotcut toolbar 'Open File' button is not visible."
-            logger.info("Clicking Shotcut 'Open File' button.")
-            open_button.click_input()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._dismiss_recovery_dialog_if_present(current_window, timeout=min(0.3, remaining))
+            logger.info("Opening Shotcut file dialog with Ctrl+O.")
+            bring_window_to_front(current_window, keep_topmost=False)
+            send_hotkey("^o")
             time.sleep(0.5)
             try:
-                self._wait_for_open_file_dialog(timeout=SHOTCUT_DIALOG_TIMEOUT_SECONDS)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._wait_for_open_file_dialog(timeout=min(SHOTCUT_DIALOG_TIMEOUT_SECONDS, remaining))
                 return
             except Exception as exc:
                 last_error = exc
-                save_changes_dismissed = self._dismiss_save_changes_dialog_if_present(current_window, timeout=0.8)
-                if save_changes_dismissed:
-                    logger.info("Shotcut save-changes dialog interrupted the open-file flow. Retrying the import dialog.")
-                recovery_dismissed = self._dismiss_recovery_dialog_if_present(current_window, timeout=0.8)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                recovery_dismissed = self._dismiss_recovery_dialog_if_present(current_window, timeout=min(0.5, remaining))
                 if recovery_dismissed:
-                    logger.info("Shotcut autosave recovery dialog interrupted the open-file flow. Retrying the import dialog.")
-                logger.info("Shotcut open-file button path did not open the dialog. Trying Ctrl+O fallback. details=%s", exc)
-                if save_changes_dismissed:
-                    try:
-                        current_window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
-                        current_toolbar = self._find_child_by_class_name(current_window, "QToolBar")
-                    except Exception:
-                        pass
+                    logger.info("Shotcut autosave recovery dialog interrupted the Ctrl+O flow. Refreshing the main window before retry.")
+                else:
+                    logger.info("Shotcut Ctrl+O did not open the input dialog yet. Refreshing the main window before retry. details=%s", exc)
                 try:
-                    bring_window_to_front(current_window, keep_topmost=False)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    current_window = self._connect_main_window(timeout=min(SHOTCUT_RECONNECT_TIMEOUT_SECONDS, remaining))
                 except Exception:
                     pass
-                send_hotkey("^o")
-                time.sleep(0.5)
-                try:
-                    self._wait_for_open_file_dialog(timeout=SHOTCUT_DIALOG_TIMEOUT_SECONDS)
-                    return
-                except Exception as hotkey_exc:
-                    last_error = hotkey_exc
-                    save_changes_dismissed = self._dismiss_save_changes_dialog_if_present(current_window, timeout=0.8)
-                    if save_changes_dismissed:
-                        logger.info(
-                            "Shotcut save-changes dialog also interrupted the Ctrl+O fallback. Refreshing the main window before retry."
-                        )
-                    self._dismiss_recovery_dialog_if_present(current_window, timeout=0.8)
-                    logger.info("Shotcut Ctrl+O fallback did not open the dialog. Refreshing the main window before retry. details=%s", hotkey_exc)
-                    try:
-                        current_window = self._connect_main_window(timeout=SHOTCUT_RECONNECT_TIMEOUT_SECONDS)
-                        current_toolbar = self._find_child_by_class_name(current_window, "QToolBar")
-                    except Exception:
-                        pass
-                    continue
-        raise AssertionError("Shotcut did not open the input file dialog after button, recovery, and Ctrl+O retries.") from last_error
+                continue
+        raise AssertionError("Shotcut did not open the input file dialog within 30 seconds using Ctrl+O.") from last_error
 
     def _wait_for_export_ready(self, encode_dock) -> None:
         logger.info("Waiting for Shotcut export button control to appear.")
-        export_button = wait_for_text_control(
-            encode_dock,
-            r"^Export Video/Audio$",
-            control_types=("Button",),
-            timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
-        )
+        export_button = self._wait_for_export_action_control(encode_dock, timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS)
         assert export_button.is_visible(), "Shotcut export button is not visible after import."
 
         logger.info(
@@ -999,32 +1155,63 @@ class ShotcutOperator(SoftwareOperator):
         )
         deadline = time.monotonic() + SHOTCUT_EXPORT_READY_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
-            if export_button.is_enabled():
+            enabled = self._is_enabled(export_button)
+            if enabled is not False:
                 logger.info("Shotcut export button is enabled.")
                 return
             time.sleep(0.5)
         raise AssertionError("Shotcut export button did not become enabled after selecting the input video.")
 
     def _show_output_pane(self, toolbar, encode_dock) -> None:
-        logger.info("Waiting for Shotcut 'Export' toolbar button.")
-        output_button = wait_for_text_control(
-            toolbar,
-            SHOTCUT_OUTPUT_BUTTON_PATTERNS,
-            control_types=("Button",),
-            timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
-        )
-        assert output_button.is_visible(), "Shotcut toolbar 'Export' button is not visible."
-        logger.info("Clicking Shotcut 'Export' toolbar button.")
-        output_button.click_input()
-        time.sleep(0.5)
-        logger.info("Confirming that the Shotcut export pane is visible.")
-        export_button = wait_for_text_control(
-            encode_dock,
-            r"^Export Video/Audio$",
-            control_types=("Button",),
-            timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
-        )
-        assert export_button.is_visible(), "Shotcut output pane did not expose 'Export Video/Audio'."
+        last_error: Exception | None = None
+        for attempt_index in range(2):
+            logger.info("Waiting for Shotcut 'Export' toolbar button.")
+            output_button = None
+            toolbar_error: UiAutomationError | None = None
+            for control_types in (("Button",), SHOTCUT_TOOLBAR_BUTTON_CONTROL_TYPES):
+                try:
+                    output_button = wait_for_text_control(
+                        toolbar,
+                        SHOTCUT_OUTPUT_BUTTON_PATTERNS,
+                        control_types=control_types,
+                        timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
+                    )
+                    break
+                except UiAutomationError as exc:
+                    toolbar_error = exc
+                    logger.info(
+                        "Shotcut toolbar Export button was not exposed with control types %s. details=%s",
+                        control_types,
+                        exc,
+                    )
+            if output_button is None:
+                raise AssertionError("Shotcut toolbar 'Export' button could not be located.") from toolbar_error
+            assert output_button.is_visible(), "Shotcut toolbar 'Export' button is not visible."
+            logger.info("Clicking Shotcut 'Export' toolbar button: %s", self._wrapper_text(output_button) or "<untitled>")
+            click_control(output_button, post_click_sleep=0.5)
+            if self._dismiss_save_changes_dialog_if_present(encode_dock, timeout=0.8):
+                logger.info(
+                    "Shotcut save-changes dialog interrupted the export pane on attempt %d. Retrying the toolbar Export button.",
+                    attempt_index + 1,
+                )
+                time.sleep(0.2)
+                continue
+            logger.info("Confirming that the Shotcut export pane is visible.")
+            try:
+                export_button = self._wait_for_export_action_control(encode_dock, timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS)
+            except AssertionError as exc:
+                last_error = exc
+                if self._dismiss_save_changes_dialog_if_present(encode_dock, timeout=0.8):
+                    logger.info(
+                        "Shotcut save-changes dialog blocked the export action button on attempt %d. Retrying the toolbar Export button.",
+                        attempt_index + 1,
+                    )
+                    time.sleep(0.2)
+                    continue
+                raise
+            assert export_button.is_visible(), "Shotcut output pane did not expose an export action button."
+            return
+        raise AssertionError("Shotcut output pane did not expose an export action button.") from last_error
 
     def _export_clip(self, encode_dock, output_video_path: Path) -> None:
         dialog_error: UiAutomationError | None = None
@@ -1039,16 +1226,11 @@ class ShotcutOperator(SoftwareOperator):
                 attempt_index + 1,
                 SHOTCUT_EXPORT_BUTTON_RETRY_COUNT,
             )
-            export_button = wait_for_text_control(
-                encode_dock,
-                r"^Export Video/Audio$",
-                control_types=("Button",),
-                timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS,
-            )
-            assert export_button.is_enabled(), "'Export Video/Audio' is disabled."
-            logger.info("Clicking Shotcut 'Export Video/Audio' button.")
-            export_button.click_input()
-            time.sleep(SHOTCUT_EXPORT_BUTTON_POST_CLICK_SECONDS)
+            export_button = self._wait_for_export_action_control(encode_dock, timeout=SHOTCUT_CONTROL_TIMEOUT_SECONDS)
+            enabled = self._is_enabled(export_button)
+            assert enabled is not False, "Shotcut export action button is disabled."
+            logger.info("Clicking Shotcut export action button: %s", self._wrapper_text(export_button) or "<untitled>")
+            click_control(export_button, post_click_sleep=SHOTCUT_EXPORT_BUTTON_POST_CLICK_SECONDS)
             try:
                 logger.info("Waiting for Shotcut export save dialog and filling output path.")
                 fill_file_dialog(
@@ -1064,6 +1246,11 @@ class ShotcutOperator(SoftwareOperator):
                 return
             except UiAutomationError as exc:
                 dialog_error = exc
+                if self._dismiss_save_changes_dialog_if_present(encode_dock, timeout=0.8):
+                    logger.info(
+                        "Shotcut save-changes dialog interrupted the export save dialog attempt %d.",
+                        attempt_index + 1,
+                    )
                 logger.info("Shotcut export save dialog attempt failed: %s", exc)
                 time.sleep(SHOTCUT_EXPORT_BUTTON_POST_CLICK_SECONDS)
         raise AssertionError("Shotcut did not open the export save dialog.") from dialog_error
@@ -4547,15 +4734,40 @@ class KdenliveOperator(SoftwareOperator):
             return
         logger.info("Closing the Kdenlive render dialog while keeping the main window open.")
         render_dialog = self._render_dialog
+        if self._main_window is not None:
+            try:
+                self._dismiss_profile_switch_prompt_if_present(self._main_window)
+            except Exception:
+                logger.exception("Could not dismiss the Kdenlive profile-switch prompt before closing the render dialog.")
         try:
-            bring_window_to_front(render_dialog, keep_topmost=False)
+            self._show_render_project_tab(render_dialog)
+        except Exception:
+            logger.exception("Could not switch the Kdenlive rendering panel back to the Render Project tab before closing.")
+        try:
+            try:
+                bring_window_to_front(render_dialog.top_level_parent(), keep_topmost=False)
+            except Exception:
+                bring_window_to_front(render_dialog, keep_topmost=False)
             close_button = find_text_control(render_dialog, KDENLIVE_CLOSE_BUTTON_PATTERNS, control_types=("Button",))
             click_control(close_button, post_click_sleep=0.5)
         except Exception:
             try:
-                render_dialog.close()
+                send_hotkey("{ESC}")
+                time.sleep(0.2)
             except Exception:
                 pass
+            try:
+                render_dialog.close()
+            except Exception:
+                try:
+                    request_window_close(render_dialog)
+                except Exception:
+                    pass
+        if self._main_window is not None:
+            try:
+                self._dismiss_profile_switch_prompt_if_present(self._main_window)
+            except Exception:
+                logger.exception("Could not dismiss the Kdenlive profile-switch prompt after closing the render dialog.")
         try:
             logger.info("Handling any Kdenlive save-confirmation dialog triggered by closing the render window.")
             self._dismiss_kdenlive_save_dialog_if_present(self._main_window or render_dialog, timeout=2.0)
@@ -4563,20 +4775,45 @@ class KdenliveOperator(SoftwareOperator):
             self._dismiss_kdenlive_save_dialog_if_present(self._main_window or render_dialog, timeout=1.0)
         except Exception:
             logger.exception("Could not dismiss Kdenlive save-confirmation dialog after closing the render window.")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and self._render_dialog_is_still_present(render_dialog):
+            try:
+                send_hotkey("{ESC}")
+            except Exception:
+                pass
+            if self._main_window is not None:
+                try:
+                    self._dismiss_profile_switch_prompt_if_present(self._main_window)
+                except Exception:
+                    pass
+            time.sleep(0.2)
         self._render_dialog = None
         if self._main_window is not None:
             try:
                 self._main_window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
+                bring_window_to_front(self._main_window, keep_topmost=False)
             except Exception:
                 pass
 
+    def _restore_main_window_for_interaction(self, window):
+        target_window = self._main_window or window
+        try:
+            target_window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
+            self._main_window = target_window
+        except Exception:
+            pass
+        try:
+            bring_window_to_front(target_window, keep_topmost=False)
+        except Exception:
+            pass
+        return target_window
+
     def _open_input_clip(self, window, input_video_path: Path):
+        window = self._restore_main_window_for_interaction(window)
         if self._dismiss_kdenlive_save_dialog_if_present(window, timeout=1.0):
             logger.info("Kdenlive save-confirmation dialog was blocking the next import. Reconnecting to the main window.")
             try:
-                window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
-                self._main_window = window
-                bring_window_to_front(window, keep_topmost=False)
+                window = self._restore_main_window_for_interaction(window)
             except Exception:
                 pass
         logger.info("Opening Kdenlive import command.")
@@ -4596,18 +4833,15 @@ class KdenliveOperator(SoftwareOperator):
         self._main_window = window
         bring_window_to_front(window, keep_topmost=False)
 
-        logger.info("Waiting for imported clip in Sequences.")
-        clip_item = self._wait_for_imported_clip(window, input_video_path)
-        logger.info("Selecting imported clip.")
-        click_control(clip_item, post_click_sleep=KDENLIVE_POST_ACTION_SLEEP_SECONDS)
+        self._select_project_bin_clip(window, input_video_path)
         return window
 
     def _render_current_timeline(self, window, output_video_path: Path):
         logger.info("Opening Kdenlive rendering dialog.")
         render_dialog = self._open_render_dialog(window)
+        self._show_render_project_tab(render_dialog)
         logger.info("Setting render output path.")
         self._set_render_output_path(render_dialog, output_video_path)
-        self._show_job_queue_tab(render_dialog)
         logger.info("Starting Kdenlive render.")
         self._start_render(render_dialog)
         self._begin_background_wait(
@@ -4831,10 +5065,31 @@ class KdenliveOperator(SoftwareOperator):
         except Exception:
             pass
         if self._main_window is not None and getattr(top_level, "handle", None) == getattr(self._main_window, "handle", None):
-            self._render_dialog = None
+            self._render_dialog = render_container
         else:
             self._render_dialog = top_level
-        logger.info("Resolved Kdenlive rendering container. top_level=%s", self._wrapper_text(top_level) or "<untitled>")
+        logger.info(
+            "Resolved Kdenlive rendering container. top_level=%s tracked_render_root=%s",
+            self._wrapper_text(top_level) or "<untitled>",
+            self._wrapper_text(self._render_dialog) or "<untitled>",
+        )
+
+    def _render_dialog_is_still_present(self, render_dialog) -> bool:
+        if render_dialog is None:
+            return False
+        try:
+            render_root = render_dialog.top_level_parent()
+        except Exception:
+            render_root = render_dialog
+        for candidate in self._iter_wrapper_tree(render_root):
+            if candidate is render_dialog:
+                return True
+            title = self._wrapper_text(candidate)
+            control_type = self._wrapper_control_type(candidate).lower()
+            if title and self._matches_patterns(title, KDENLIVE_RENDER_WINDOW_PATTERNS):
+                if control_type in {"window", "pane", "group", "custom"}:
+                    return True
+        return False
 
     def _iter_render_search_roots(self, window):
         yielded_handles: set[int | None] = set()
@@ -4892,11 +5147,10 @@ class KdenliveOperator(SoftwareOperator):
         return dismissed
 
     def _open_import_dialog(self, window) -> None:
+        window = self._restore_main_window_for_interaction(window)
         if self._dismiss_recovery_dialog_if_present(window, timeout=0.8):
             logger.info("Recovered Kdenlive main window focus after dismissing the recovery dialog during import setup.")
-            window = self._connect_main_window(timeout=KDENLIVE_CONTROL_TIMEOUT_SECONDS)
-            self._main_window = window
-            bring_window_to_front(window, keep_topmost=False)
+            window = self._restore_main_window_for_interaction(window)
         try:
             logger.info("Trying Kdenlive toolbar add-clip button.")
             add_clip_button = wait_for_text_control(window, KDENLIVE_ADD_CLIP_PATTERNS, control_types=("Button",), timeout=2.0)
@@ -4912,9 +5166,23 @@ class KdenliveOperator(SoftwareOperator):
             logger.info("Kdenlive toolbar import path unavailable: %s", exc)
 
         logger.info("Falling back to Project -> Add Clip or Folder.")
-        click_text_control(window, KDENLIVE_PROJECT_MENU_PATTERNS, control_types=("MenuItem",))
-        time.sleep(0.3)
-        click_text_control(window, KDENLIVE_ADD_CLIP_PATTERNS, control_types=("MenuItem",))
+        try:
+            click_text_control(window, KDENLIVE_PROJECT_MENU_PATTERNS, control_types=("MenuItem",))
+            time.sleep(0.3)
+            click_text_control(window, KDENLIVE_ADD_CLIP_PATTERNS, control_types=("MenuItem",))
+            dialog = wait_for_file_dialog(
+                dialog_patterns=KDENLIVE_OPEN_DIALOG_PATTERNS,
+                confirm_patterns=KDENLIVE_OPEN_CONFIRM_PATTERNS,
+                timeout=KDENLIVE_DIALOG_TIMEOUT_SECONDS,
+            )
+            assert dialog is not None, "Kdenlive did not open the import dialog."
+            return
+        except Exception as exc:
+            logger.info("Kdenlive Project-menu import path unavailable: %s", exc)
+
+        logger.info("Falling back to Ctrl+O for the Kdenlive import dialog.")
+        window = self._restore_main_window_for_interaction(window)
+        send_hotkey("^o")
         dialog = wait_for_file_dialog(
             dialog_patterns=KDENLIVE_OPEN_DIALOG_PATTERNS,
             confirm_patterns=KDENLIVE_OPEN_CONFIRM_PATTERNS,
@@ -4931,6 +5199,12 @@ class KdenliveOperator(SoftwareOperator):
         )
         assert clip_item.is_visible(), f"Kdenlive did not show imported clip '{input_video_path.name}' in Project Bin."
         return clip_item
+
+    def _select_project_bin_clip(self, window, input_video_path: Path) -> None:
+        logger.info("Waiting for Kdenlive clip in Project Bin: %s", input_video_path.name)
+        clip_item = self._wait_for_imported_clip(window, input_video_path)
+        logger.info("Selecting Kdenlive clip in Project Bin: %s", input_video_path.name)
+        click_control(clip_item, post_click_sleep=KDENLIVE_POST_ACTION_SLEEP_SECONDS)
 
     def _insert_clip_to_timeline(self, window) -> None:
         logger.info("Sending Kdenlive shortcut 'v' to insert the selected clip into the timeline.")
@@ -5153,6 +5427,43 @@ class KdenliveOperator(SoftwareOperator):
             click_control(job_queue_tab, post_click_sleep=0.3)
         except Exception as exc:
             logger.info("Could not switch to the Kdenlive Job Queue tab: %s", exc)
+
+    def _show_render_project_tab(self, render_dialog) -> None:
+        logger.info("Switching Kdenlive rendering panel back to the Render Project tab.")
+        try:
+            render_root = render_dialog.top_level_parent()
+        except Exception:
+            render_root = render_dialog
+        try:
+            bring_window_to_front(render_root, keep_topmost=False)
+        except Exception:
+            try:
+                bring_window_to_front(render_dialog, keep_topmost=False)
+            except Exception:
+                pass
+        search_roots = []
+        for candidate in (render_dialog, render_root):
+            if any(getattr(existing, "handle", None) == getattr(candidate, "handle", None) for existing in search_roots):
+                continue
+            search_roots.append(candidate)
+        last_error: Exception | None = None
+        for candidate in search_roots:
+            try:
+                render_project_tab = find_text_control(
+                    candidate,
+                    KDENLIVE_RENDER_PROJECT_TAB_PATTERNS,
+                    control_types=("TabItem", "Button", "Text"),
+                )
+                logger.info("Clicking Kdenlive 'Render Project' tab: %s", self._wrapper_text(render_project_tab) or "<untitled>")
+                click_control(render_project_tab, post_click_sleep=0.3)
+                return
+            except Exception as exc:
+                last_error = exc
+        logger.info(
+            "Kdenlive Render Project tab was not found on the rendering window. "
+            "Continuing on the current panel. details=%s",
+            last_error,
+        )
 
     def _read_progress_ratio(self, render_dialog) -> float | None:
         best_candidate = None

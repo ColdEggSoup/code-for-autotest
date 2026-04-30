@@ -339,6 +339,10 @@ def test_run_kdenlive_case_sequence_reuses_one_session_for_three_cases(monkeypat
             steps.append(("open_input", input_path.name))
             return window
 
+        def _select_project_bin_clip(self, current_window, input_path: Path) -> None:
+            assert current_window is window
+            steps.append(("select_existing", input_path.name))
+
         def _insert_clip_to_timeline(self, current_window) -> None:
             assert current_window is window
             steps.append(("insert", None))
@@ -385,15 +389,32 @@ def test_run_kdenlive_case_sequence_reuses_one_session_for_three_cases(monkeypat
         "open_input",
         "insert",
         "render",
+        "close_render_dialog",
         "open_input",
         "insert",
         "render",
         "close_render_dialog",
+        "select_existing",
         "insert",
-        "open_input",
+        "select_existing",
         "insert",
         "render",
         "close",
+    ]
+    assert steps[2:5] == [("open_input", "4K_big.mp4"), ("insert", None), ("render", "kdenlive_demo_baseline.mp4")]
+    assert steps[5:9] == [
+        ("close_render_dialog", None),
+        ("open_input", "4K_small.mp4"),
+        ("insert", None),
+        ("render", "kdenlive_4k_1big_1small_baseline.mp4"),
+    ]
+    assert steps[9:15] == [
+        ("close_render_dialog", None),
+        ("select_existing", "4K_small.mp4"),
+        ("insert", None),
+        ("select_existing", "4K_big.mp4"),
+        ("insert", None),
+        ("render", "kdenlive_4k_2big_2small_baseline.mp4"),
     ]
     assert [case.case_id for case, _ in results] == [
         "kdenlive__baseline",

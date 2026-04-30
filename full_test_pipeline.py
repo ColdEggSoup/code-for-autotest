@@ -1287,12 +1287,16 @@ def run_kdenlive_case_sequence(
                     window = operator._open_input_clip(window, input_video_path)
                     operator._insert_clip_to_timeline(window)
                 elif case.sequence_order == 2:
+                    operator._close_render_dialog_only()
+                    window = getattr(operator, "_main_window", None) or window
                     window = operator._open_input_clip(window, small_input_video_path)
                     operator._insert_clip_to_timeline(window)
                 elif case.sequence_order == 3:
                     operator._close_render_dialog_only()
+                    window = getattr(operator, "_main_window", None) or window
+                    operator._select_project_bin_clip(window, small_input_video_path)
                     operator._insert_clip_to_timeline(window)
-                    window = operator._open_input_clip(window, input_video_path)
+                    operator._select_project_bin_clip(window, input_video_path)
                     operator._insert_clip_to_timeline(window)
                 else:
                     raise AssertionError(f"Unsupported Kdenlive sequence order: {case.sequence_order}")

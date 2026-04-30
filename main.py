@@ -46,6 +46,27 @@ BLENDER_VISIBLE_FORCE_EXIT_WAIT_SECONDS = 10.0
 BLENDER_VISIBLE_WINDOW_MINIMIZE_TIMEOUT_SECONDS = 30.0
 
 
+def _print_console_line(text: str) -> None:
+    try:
+        print(text)
+        return
+    except UnicodeEncodeError:
+        pass
+    stdout = getattr(sys, "stdout", None)
+    buffer = getattr(stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(f"{text}\n".encode(getattr(stdout, "encoding", None) or "utf-8", errors="backslashreplace"))
+        buffer.flush()
+        return
+    encoded = f"{text}\n".encode("ascii", errors="backslashreplace").decode("ascii")
+    if stdout is not None:
+        stdout.write(encoded)
+        stdout.flush()
+        return
+    sys.__stdout__.write(encoded)
+    sys.__stdout__.flush()
+
+
 def get_monitor_type(software: str) -> str:
     if software in PROCESS_PROFILES:
         return "process"
@@ -504,31 +525,31 @@ def is_process_alive(pid: int | None) -> bool:
 
 
 def print_session_summary(record: dict) -> None:
-    print(f"session_id={record['session_id']}")
+    _print_console_line(f"session_id={record['session_id']}")
     if record.get("requested_session_id"):
-        print(f"requested_session_id={record['requested_session_id']}")
-    print(f"software={record['software']}")
+        _print_console_line(f"requested_session_id={record['requested_session_id']}")
+    _print_console_line(f"software={record['software']}")
     if record.get("test_name"):
-        print(f"test_name={record['test_name']}")
-    print(f"monitor_type={record['monitor_type']}")
-    print(f"status={record['status']}")
-    print(f"pid={record.get('pid', '')}")
-    print(f"state_path={record['state_path']}")
-    print(f"stop_path={record['stop_path']}")
-    print(f"session_output_path={record['session_output_path']}")
-    print(f"aggregate_output_path={record['output_path']}")
+        _print_console_line(f"test_name={record['test_name']}")
+    _print_console_line(f"monitor_type={record['monitor_type']}")
+    _print_console_line(f"status={record['status']}")
+    _print_console_line(f"pid={record.get('pid', '')}")
+    _print_console_line(f"state_path={record['state_path']}")
+    _print_console_line(f"stop_path={record['stop_path']}")
+    _print_console_line(f"session_output_path={record['session_output_path']}")
+    _print_console_line(f"aggregate_output_path={record['output_path']}")
     if record.get("output_base_path"):
-        print(f"output_base_path={record['output_base_path']}")
+        _print_console_line(f"output_base_path={record['output_base_path']}")
     if record.get("output_run_index"):
-        print(f"output_run_index={record['output_run_index']}")
+        _print_console_line(f"output_run_index={record['output_run_index']}")
     if record.get("xlsx_status"):
-        print(f"xlsx_status={record['xlsx_status']}")
+        _print_console_line(f"xlsx_status={record['xlsx_status']}")
     if record.get("xlsx_csv_count") is not None:
-        print(f"xlsx_csv_count={record['xlsx_csv_count']}")
+        _print_console_line(f"xlsx_csv_count={record['xlsx_csv_count']}")
     if record.get("xlsx_row_count") is not None:
-        print(f"xlsx_row_count={record['xlsx_row_count']}")
+        _print_console_line(f"xlsx_row_count={record['xlsx_row_count']}")
     if record.get("xlsx_error"):
-        print(f"xlsx_error={record['xlsx_error']}")
+        _print_console_line(f"xlsx_error={record['xlsx_error']}")
     if record.get("worker_stdout_path"):
         print(f"worker_stdout_path={record['worker_stdout_path']}")
     if record.get("worker_stderr_path"):

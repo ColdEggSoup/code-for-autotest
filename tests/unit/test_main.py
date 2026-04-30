@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -37,6 +38,36 @@ def test_default_blender_executable_returns_repo_candidate_when_none_exist(monke
     )
 
     assert main.default_blender_executable() == repo_candidate
+
+
+def test_print_session_summary_falls_back_when_console_cannot_encode_unicode(monkeypatch) -> None:
+    output = io.BytesIO()
+    fake_stdout = SimpleNamespace(buffer=output, encoding="cp1252")
+
+    def _raise_unicode(*args, **kwargs):
+        raise UnicodeEncodeError("charmap", "4k(1大1小)_baseline", 0, 1, "cannot encode")
+
+    monkeypatch.setattr("builtins.print", _raise_unicode)
+    monkeypatch.setattr(main.sys, "stdout", fake_stdout)
+
+    main.print_session_summary(
+        {
+            "session_id": "session-001",
+            "software": "shotcut",
+            "test_name": "4k(1大1小)_baseline",
+            "monitor_type": "process",
+            "status": "running",
+            "pid": 1234,
+            "state_path": "state.json",
+            "stop_path": "stop.txt",
+            "session_output_path": "session.csv",
+            "output_path": "aggregate.csv",
+        }
+    )
+
+    text = output.getvalue().decode("ascii")
+    assert "session_id=session-001" in text
+    assert r"test_name=4k(1\u5927" in text
 
 
 def test_build_blender_command_visible_mode_omits_direct_render_flags_and_registers_listener_before_render(
